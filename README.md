@@ -153,3 +153,8 @@ The *tcp.flags.rst* attribute tells Flowsynth to force the packet to be a RST pa
 ## Authors ###
 
 +	Will Urbanski (will dot urbanski at gmail dot com)
+
+#### Contributors ####
+
++	David Wharton
+
