@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<!--[if IE 7]>
+<html id="ie7" lang="en">
+<![endif]-->
+<!--[if IE 8]>
+<html id="ie8" lang="en">
+<![endif]-->
+<!--[if IE 9]>
+<html id="ie9" lang="en">
+<![endif]-->
+<!--[if !(IE 7) & !(IE 8) & !(IE 9)]><!-->
+<html lang="en">
+<!--<![endif]-->
+<head>
+<meta charset="UTF-8" />
+<title>Suricata | Open Source IDS / IPS / NSM engine</title>
+<link rel="profile" href="http://gmpg.org/xfn/11" />
+<link rel="pingback" href="https://suricata-ids.org/xmlrpc.php" />
+<meta name="google-site-verification" content="XH7XPxgU23JF5CVf0j-FOBqcUfn6m2sTbzMGUrFXAmw" />
+		<script src='https://r-login.wordpress.com/remote-login.php?action=js&amp;host=suricata-ids.org&amp;id=40452214&amp;t=1510073926&amp;back=https%3A%2F%2Fsuricata-ids.org%2F' type="text/javascript"></script>
+		<script type="text/javascript">
+		/* <![CDATA[ */
+			if ( 'function' === typeof WPRemoteLogin ) {
+				document.cookie = "wordpress_test_cookie=test; path=/";
+				if ( document.cookie.match( /(;|^)\s*wordpress_test_cookie\=/ ) ) {
+					WPRemoteLogin();
+				}
+			}
+		/* ]]> */
+		</script>
+		<link rel='dns-prefetch' href='//s2.wp.com' />
+<link rel='dns-prefetch' href='//s0.wp.com' />
+<link rel='dns-prefetch' href='//idsips.wordpress.com' />
+<link rel='dns-prefetch' href='//s1.wp.com' />
+<link rel="alternate" type="application/rss+xml" title="Suricata &raquo; Feed" href="https://suricata-ids.org/feed/" />
+<link rel="alternate" type="application/rss+xml" title="Suricata &raquo; Comments Feed" href="https://suricata-ids.org/comments/feed/" />
+	<script type="text/javascript">
+		/* <![CDATA[ */
+		function addLoadEvent(func) {
+			var oldonload = window.onload;
+			if (typeof window.onload != 'function') {
+				window.onload = func;
+			} else {
+				window.onload = function () {
+					oldonload();
+					func();
+				}
+			}
+		}
+		/* ]]> */
+	</script>
+			<script type="text/javascript">
+			window._wpemojiSettings = {"baseUrl":"https:\/\/s0.wp.com\/wp-content\/mu-plugins\/wpcom-smileys\/twemoji\/2\/72x72\/","ext":".png","svgUrl":"https:\/\/s0.wp.com\/wp-content\/mu-plugins\/wpcom-smileys\/twemoji\/2\/svg\/","svgExt":".svg","source":{"concatemoji":"https:\/\/s0.wp.com\/wp-includes\/js\/wp-emoji-release.min.js?m=1505864856h&ver=4.8.2"}};
+			!function(a,b,c){function d(a){var b,c,d,e,f=String.fromCharCode;if(!k||!k.fillText)return!1;switch(k.clearRect(0,0,j.width,j.height),k.textBaseline="top",k.font="600 32px Arial",a){case"flag":return k.fillText(f(55356,56826,55356,56819),0,0),b=j.toDataURL(),k.clearRect(0,0,j.width,j.height),k.fillText(f(55356,56826,8203,55356,56819),0,0),c=j.toDataURL(),b!==c&&(k.clearRect(0,0,j.width,j.height),k.fillText(f(55356,57332,56128,56423,56128,56418,56128,56421,56128,56430,56128,56423,56128,56447),0,0),b=j.toDataURL(),k.clearRect(0,0,j.width,j.height),k.fillText(f(55356,57332,8203,56128,56423,8203,56128,56418,8203,56128,56421,8203,56128,56430,8203,56128,56423,8203,56128,56447),0,0),c=j.toDataURL(),b!==c);case"emoji4":return k.fillText(f(55358,56794,8205,9794,65039),0,0),d=j.toDataURL(),k.clearRect(0,0,j.width,j.height),k.fillText(f(55358,56794,8203,9794,65039),0,0),e=j.toDataURL(),d!==e}return!1}function e(a){var c=b.createElement("script");c.src=a,c.defer=c.type="text/javascript",b.getElementsByTagName("head")[0].appendChild(c)}var f,g,h,i,j=b.createElement("canvas"),k=j.getContext&&j.getContext("2d");for(i=Array("flag","emoji4"),c.supports={everything:!0,everythingExceptFlag:!0},h=0;h<i.length;h++)c.supports[i[h]]=d(i[h]),c.supports.everything=c.supports.everything&&c.supports[i[h]],"flag"!==i[h]&&(c.supports.everythingExceptFlag=c.supports.everythingExceptFlag&&c.supports[i[h]]);c.supports.everythingExceptFlag=c.supports.everythingExceptFlag&&!c.supports.flag,c.DOMReady=!1,c.readyCallback=function(){c.DOMReady=!0},c.supports.everything||(g=function(){c.readyCallback()},b.addEventListener?(b.addEventListener("DOMContentLoaded",g,!1),a.addEventListener("load",g,!1)):(a.attachEvent("onload",g),b.attachEvent("onreadystatechange",function(){"complete"===b.readyState&&c.readyCallback()})),f=c.source||{},f.concatemoji?e(f.concatemoji):f.wpemoji&&f.twemoji&&(e(f.twemoji),e(f.wpemoji)))}(window,document,window._wpemojiSettings);
+		</script>
+		<style type="text/css">
+img.wp-smiley,
+img.emoji {
+	display: inline !important;
+	border: none !important;
+	box-shadow: none !important;
+	height: 1em !important;
+	width: 1em !important;
+	margin: 0 .07em !important;
+	vertical-align: -0.1em !important;
+	background: none !important;
+	padding: 0 !important;
+}
+</style>
+<link rel='stylesheet' id='all-css-0-1' href='https://s1.wp.com/_static/??-eJyNkdFOwzAMRX8IExUQgwfEt6SZ13m1k6h2Vfb3pI0qNEDRXqJ7nXtiW3FLhpCiYTQnM2SeB4rqlhySgAoxXn+5x6D64P7HmEZUd0HLPoywuVY8pAlLXbK3NSF4JI+MUmItbKHjgFZw3TUYfjURya97o1Wey3jNyerGfZ8nVIVyCs0Cdi6z/eVq2eW5dzpiNgqendqV8b4oxVDjsLW9Z3VNgTwDlcitqTC5mKxe7qL16oAJOAVvlOKNgRN7mlrohD2nochh+44fu0Kf8tG9vB+e3rruubt8A07b6Nw=' type='text/css' media='all' />
+<link rel='stylesheet' id='print-css-1-1' href='https://s0.wp.com/wp-content/mu-plugins/global-print/global-print.css?m=1465851035h' type='text/css' media='print' />
+<link rel='stylesheet' id='all-css-2-1' href='https://s2.wp.com/_static/??-eJx9i9EKwjAMRX/IGoVN54P4LVnp2kialCbD3xcfRGTi0z0XzoFHC1HFkzjUNTReM4kBRieVGfuH9tFsB7/1puZhYaQOVrCT5Pf+q0wjIQfWrN9nE3lJNRmUATLrjPwSbvV6HC6H83Qap/H+BMWZScE=' type='text/css' media='all' />
+<script type='text/javascript' src='https://s1.wp.com/_static/??-eJyFztEKwjAMBdAfsquTiXsRv6XWOFKXtDbphn69HeiDMBQCgdzDJXZOBtmP5QJiQ517gfx4rybIxv4ChnDITqEh5A/2kRVYF0vxjCOYIpDdUG+16BpXXIqiBCIVraTfLyFPCPNfFkCT8zeTQfC5tJ7o2Hb9Yde3+24bXjRNW9I='></script>
+<link rel="EditURI" type="application/rsd+xml" title="RSD" href="https://idsips.wordpress.com/xmlrpc.php?rsd" />
+<link rel="wlwmanifest" type="application/wlwmanifest+xml" href="https://s1.wp.com/wp-includes/wlwmanifest.xml" /> 
+<meta name="generator" content="WordPress.com" />
+<link rel="canonical" href="https://suricata-ids.org/" />
+<link rel='shortlink' href='https://wp.me/P2JJt4-p' />
+<link rel="alternate" type="application/json+oembed" href="https://public-api.wordpress.com/oembed/?format=json&amp;url=https%3A%2F%2Fsuricata-ids.org%2F&amp;for=wpcom-auto-discovery" /><link rel="alternate" type="application/xml+oembed" href="https://public-api.wordpress.com/oembed/?format=xml&amp;url=https%3A%2F%2Fsuricata-ids.org%2F&amp;for=wpcom-auto-discovery" />
+<!-- Jetpack Open Graph Tags -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Suricata" />
+<meta property="og:description" content="Open Source IDS / IPS / NSM engine" />
+<meta property="og:url" content="https://suricata-ids.org/" />
+<meta property="og:site_name" content="Suricata" />
+<meta property="og:image" content="https://idsips.files.wordpress.com/2012/09/kibana-selks4.png" />
+<meta property="og:image:width" content="1693" />
+<meta property="og:image:height" content="784" />
+<meta property="og:locale" content="en_US" />
+<meta name="twitter:site" content="@Suricata_IDS" />
+<meta name="twitter:text:title" content="Suricata" />
+<meta name="twitter:image" content="https://idsips.files.wordpress.com/2012/09/kibana-selks4.png?w=240" />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:creator" content="@Suricata_IDS" />
+<meta property="article:publisher" content="https://www.facebook.com/WordPresscom" />
+<link rel="shortcut icon" type="image/x-icon" href="https://secure.gravatar.com/blavatar/b35fe77e09a7541f738f500f4db6b857?s=32" sizes="16x16" />
+<link rel="icon" type="image/x-icon" href="https://secure.gravatar.com/blavatar/b35fe77e09a7541f738f500f4db6b857?s=32" sizes="16x16" />
+<link rel="apple-touch-icon-precomposed" href="https://secure.gravatar.com/blavatar/b35fe77e09a7541f738f500f4db6b857?s=114" />
+<link rel='openid.server' href='https://idsips.wordpress.com/?openidserver=1' />
+<link rel='openid.delegate' href='https://idsips.wordpress.com/' />
+<link rel="search" type="application/opensearchdescription+xml" href="https://suricata-ids.org/osd.xml" title="Suricata" />
+<link rel="search" type="application/opensearchdescription+xml" href="https://s1.wp.com/opensearch.xml" title="WordPress.com" />
+<meta name="application-name" content="Suricata" /><meta name="msapplication-window" content="width=device-width;height=device-height" /><meta name="msapplication-tooltip" content="Open Source IDS / IPS / NSM engine" /><meta name="msapplication-task" content="name=Subscribe;action-uri=https://suricata-ids.org/feed/;icon-uri=https://secure.gravatar.com/blavatar/b35fe77e09a7541f738f500f4db6b857?s=16" /><meta name="msapplication-task" content="name=Sign up for a free blog;action-uri=http://wordpress.com/signup/;icon-uri=https://s2.wp.com/i/favicon.ico" /><meta name="msapplication-task" content="name=WordPress.com Support;action-uri=http://support.wordpress.com/;icon-uri=https://s2.wp.com/i/favicon.ico" /><meta name="msapplication-task" content="name=WordPress.com Forums;action-uri=http://forums.wordpress.com/;icon-uri=https://s2.wp.com/i/favicon.ico" /><meta name="title" content="Suricata | Suricata on WordPress.com" />
+<meta name="description" content="Suricata is a free and open source, mature, fast and robust network threat detection engine. The Suricata engine is capable of real time intrusion detection (IDS), inline intrusion prevention (IPS), network security monitoring (NSM) and offline pcap processing. Suricata inspects the network traffic using a powerful and extensive rules and signature language, and has powerful&hellip;" />
+<style type="text/css" id="syntaxhighlighteranchor"></style>
+</head>
+
+<body class="home page-template-default page page-id-25 page-child parent-pageid-2 mp6 customizer-styles-applied highlander-enabled highlander-light">
+<div id="wrapper">
+		<div id="header">
+ 		<div class="col-full">
+			<div id="logo">
+								<span class="site-title">
+					<a href="https://suricata-ids.org/" title="Suricata" rel="home">Suricata</a>
+				</span>
+				<span class="site-description">Open Source IDS / IPS / NSM engine</span>
+			</div><!-- /#logo -->
+
+			<div id="navigation">
+					<ul id="main-nav" class="nav fl">
+		<li class="page_item page-item-33"><a href="https://suricata-ids.org/news/">News</a></li>
+<li class="page_item page-item-4 page_item_has_children"><a href="https://suricata-ids.org/features/">Features</a>
+<ul class='children'>
+	<li class="page_item page-item-148"><a href="https://suricata-ids.org/features/all-features/">All features</a></li>
+</ul>
+</li>
+<li class="page_item page-item-18"><a href="https://suricata-ids.org/download/">Download</a></li>
+<li class="page_item page-item-278"><a href="https://suricata-ids.org/docs/">Docs</a></li>
+<li class="page_item page-item-43"><a href="https://suricata-ids.org/participate/">Participate</a></li>
+<li class="page_item page-item-675"><a href="https://suricata-ids.org/training/">Training</a></li>
+<li class="page_item page-item-20"><a href="https://suricata-ids.org/support/">Support</a></li>
+<li class="page_item page-item-2 page_item_has_children current_page_ancestor current_page_parent"><a href="https://suricata-ids.org/about/">About</a>
+<ul class='children'>
+	<li class="page_item page-item-223"><a href="https://suricata-ids.org/about/contact/">Contact</a></li>
+	<li class="page_item page-item-139"><a href="https://suricata-ids.org/about/team/">Team</a></li>
+	<li class="page_item page-item-168"><a href="https://suricata-ids.org/about/oisf/">OISF</a></li>
+	<li class="page_item page-item-864"><a href="https://suricata-ids.org/about/contribution-agreement/">Contribution Agreement</a></li>
+	<li class="page_item page-item-1253"><a href="https://suricata-ids.org/about/eol-policy/">EOL policy</a></li>
+	<li class="page_item page-item-25 current_page_item"><a href="https://suricata-ids.org/">Suricata</a></li>
+	<li class="page_item page-item-8"><a href="https://suricata-ids.org/about/open-source/">Open Source</a></li>
+	<li class="page_item page-item-87"><a href="https://suricata-ids.org/about/consortium/">Consortium Members</a></li>
+</ul>
+</li>
+	</ul>
+							</div><!-- /#navigation -->
+		</div><!-- /.col-full -->
+	</div><!-- /#header -->
+		<div id="header-image">
+		<a href="https://suricata-ids.org/" title="Suricata" rel="home"><img src="https://idsips.files.wordpress.com/2012/09/cropped-dreamstime_l_22341748.jpg" width="940" height="200" alt="" /></a>
+	</div>
+	
+
+<div id="content" class="page col-full">
+	<div id="main" class="col-left">
+		
+			<div class="post page clearfix">
+				<h1 class="title">Suricata</h1>
+				<div class="entry clearfix">
+					<p>Suricata is a free and open source, mature, fast and robust network threat detection engine.</p>
+<p>The Suricata engine is capable of real time intrusion detection (IDS), inline intrusion prevention (IPS), network security monitoring (NSM) and offline pcap processing.</p>
+<p>Suricata inspects the network traffic using a powerful and extensive rules and signature language, and has powerful Lua scripting support for detection of complex threats.</p>
+<p>With standard input and output formats like YAML and JSON integrations with tools like existing SIEMs, Splunk, Logstash/Elasticsearch, Kibana, and other database become effortless.</p>
+<p>Suricata&#8217;s fast paced community driven development focuses on security, usability and efficiency.</p>
+<p>The Suricata project and code is owned and supported by the Open Information Security Foundation (<a href="https://suricata-ids.org/about/oisf/">OISF</a>), a non-profit foundation committed to ensuring Suricata&#8217;s development and sustained success as an open source project.</p>
+<p><img data-attachment-id="1164" data-permalink="https://suricata-ids.org/about/suricata/kibana-selks4/" data-orig-file="https://idsips.files.wordpress.com/2012/09/kibana-selks4.png?w=659" data-orig-size="1693,784" data-comments-opened="1" data-image-meta="{&quot;aperture&quot;:&quot;0&quot;,&quot;credit&quot;:&quot;&quot;,&quot;camera&quot;:&quot;&quot;,&quot;caption&quot;:&quot;&quot;,&quot;created_timestamp&quot;:&quot;0&quot;,&quot;copyright&quot;:&quot;&quot;,&quot;focal_length&quot;:&quot;0&quot;,&quot;iso&quot;:&quot;0&quot;,&quot;shutter_speed&quot;:&quot;0&quot;,&quot;title&quot;:&quot;&quot;,&quot;orientation&quot;:&quot;0&quot;}" data-image-title="Suricata alerts" data-image-description="&lt;p&gt;Suricata alerts as shown by Kibana in SELKS4&lt;/p&gt;
+" data-medium-file="https://idsips.files.wordpress.com/2012/09/kibana-selks4.png?w=659?w=300" data-large-file="https://idsips.files.wordpress.com/2012/09/kibana-selks4.png?w=659?w=659" class="alignnone size-full wp-image-1164" src="https://idsips.files.wordpress.com/2012/09/kibana-selks4.png?w=659" alt="Suricata alerts" srcset="https://idsips.files.wordpress.com/2012/09/kibana-selks4.png?w=659 659w, https://idsips.files.wordpress.com/2012/09/kibana-selks4.png?w=1318 1318w, https://idsips.files.wordpress.com/2012/09/kibana-selks4.png?w=150 150w, https://idsips.files.wordpress.com/2012/09/kibana-selks4.png?w=300 300w, https://idsips.files.wordpress.com/2012/09/kibana-selks4.png?w=768 768w, https://idsips.files.wordpress.com/2012/09/kibana-selks4.png?w=1024 1024w" sizes="(max-width: 659px) 100vw, 659px"   /></p>
+<p>&nbsp;</p>
+									</div>
+			</div><!-- /.post -->
+
+				<div id="comments">
+	
+	
+	
+</div><!-- #comments -->
+		
+	</div><!-- /#main -->
+	<div id="sidebar" class="col-right">
+		<div id="rss-2" class="widget widget_rss"><h3><a class="rsswidget" href="http://www.eventbrite.com/rss/organizer_list_events/4754805271" title="Syndicate this content"><img style="background: orange; color: white; border: none;" width="14" height="14" src="https://s-ssl.wordpress.com/wp-includes/images/rss.png?m=1354137473h" alt="RSS" /></a> <a class="rsswidget" href="http://www.eventbrite.com/org/4754805271" title="The Open Information Security Foundation (OISF) is a team of multi-national software developers and security experts committed to open source security technologies and identifying groundbreaking trends in information security and network monitoring. OISF, a 501(c)3 non-profit organization, owns and supports Suricata. To learn more about the community or becoming a consortium member contact us at info@oisf.net  ">EVENTS</a></h3><ul><li><a class='rsswidget' href='https://www.eventbrite.com/e/2-day-suricata-training-suricon-2017-tickets-32303327121?aff=rss' title='When: Monday, November 13, 2017 at 9:00 AM - Tuesday, November 14, 2017 at 6:00 PM (CET) Where: Hotel Grandior Prague110 00 Praha 1-Florenc110 00 PragueCzech Republic Register for this event now at : https://www.eventbrite.com/e/2-day-suricata-training-suricon-2017-tickets-32303327121?aff=rss Event Details: Suricata is a high-performance Network IDS, IPS and [&hellip;]'>2-Day Suricata Training @ SuriCon 2017</a></li><li><a class='rsswidget' href='https://www.eventbrite.com/e/2-day-sigdev-training-suricon-2017-tickets-36460477269?aff=rss' title='When: Monday, November 13, 2017 at 9:00 AM - Tuesday, November 14, 2017 at 6:00 PM (CET) Where: Hotel Grandior Prague110 00 Praha 1-Florenc110 00 PragueCzech Republic Register for this event now at : https://www.eventbrite.com/e/2-day-sigdev-training-suricon-2017-tickets-36460477269?aff=rss Event Details: Suricata is a high-performance Network IDS, IPS and N [&hellip;]'>2-Day Sigdev Training @ SuriCon 2017</a></li><li><a class='rsswidget' href='https://www.eventbrite.com/e/suricon-2017-tickets-32303161626?aff=rss' title='When: Wednesday, November 15, 2017 at 9:00 AM - Friday, November 17, 2017 at 6:00 PM (CET) Where: Hotel Grandior PragueNa Poříčí 42 110 00 Praha 1-FlorencCzech Republic Register for this event now at : https://www.eventbrite.com/e/suricon-2017-tickets-32303161626?aff=rss Event Details: In 2015, the OISF community came together in Barcelona, Spain, for the fi [&hellip;]'>SuriCon 2017</a></li></ul></div><div id="text-2" class="widget widget_text"><h3>Releases</h3>			<div class="textwidget"><table border="0">
+<tbody>
+<tr>
+<td width="80"><strong>Stable</strong></td>
+<td><a title="4.0.1" href="https://www.openinfosecfoundation.org/download/suricata-4.0.1.tar.gz">4.0.1</a></td>
+</tr>
+<tr>
+<td width="80"><strong>Oldstable</strong></td>
+<td><a title="3.2.4" href="https://www.openinfosecfoundation.org/download/suricata-3.2.4.tar.gz">3.2.4</a></td>
+</tr>
+</tbody>
+</table>
+</div>
+		</div><div id="text-4" class="widget widget_text"><h3>Twitter</h3>			<div class="textwidget"> <a href="https://twitter.com/Suricata_IDS" class="twitter-follow-button" data-show-count="false" data-text-color="#555555" data-link-color="#000000">Follow @Suricata_IDS</a></div>
+		</div><div id="twitter_timeline-2" class="widget widget_twitter_timeline"><a class="twitter-timeline" data-width="225" data-height="400" data-theme="light" data-link-color="#f96e5b" data-border-color="#e8e8e8" data-tweet-limit="3" data-lang="EN" data-partner="jetpack" data-chrome="noheader nofooter noscrollbar transparent" data-widget-id="498389662927294464">My Tweets</a></div><div id="media_image-3" class="widget widget_media_image"><style>.widget.widget_media_image { overflow: hidden; }.widget.widget_media_image img { height: auto; max-width: 100%; }</style><a href="http://www.oisf.net" class="" rel="" target=""><img width="181" height="124" src="https://idsips.files.wordpress.com/2015/10/oisf-larger.jpg?w=181" class="image wp-image-906 alignnone attachment-200x124 size-200x124" alt="OISF" style="max-width: 100%; height: auto;" srcset="https://idsips.files.wordpress.com/2015/10/oisf-larger.jpg?w=181 181w, https://idsips.files.wordpress.com/2015/10/oisf-larger.jpg?w=362 362w, https://idsips.files.wordpress.com/2015/10/oisf-larger.jpg?w=150 150w, https://idsips.files.wordpress.com/2015/10/oisf-larger.jpg?w=300 300w" sizes="(max-width: 181px) 100vw, 181px" data-attachment-id="906" data-permalink="https://suricata-ids.org/oisf-larger/" data-orig-file="https://idsips.files.wordpress.com/2015/10/oisf-larger.jpg" data-orig-size="519,355" data-comments-opened="1" data-image-meta="{&quot;aperture&quot;:&quot;0&quot;,&quot;credit&quot;:&quot;&quot;,&quot;camera&quot;:&quot;&quot;,&quot;caption&quot;:&quot;&quot;,&quot;created_timestamp&quot;:&quot;0&quot;,&quot;copyright&quot;:&quot;&quot;,&quot;focal_length&quot;:&quot;0&quot;,&quot;iso&quot;:&quot;0&quot;,&quot;shutter_speed&quot;:&quot;0&quot;,&quot;title&quot;:&quot;&quot;,&quot;orientation&quot;:&quot;0&quot;}" data-image-title="OISF larger" data-image-description="" data-medium-file="https://idsips.files.wordpress.com/2015/10/oisf-larger.jpg?w=300" data-large-file="https://idsips.files.wordpress.com/2015/10/oisf-larger.jpg?w=519" /></a></div><div id="media_image-2" class="widget widget_media_image"><style>.widget.widget_media_image { overflow: hidden; }.widget.widget_media_image img { height: auto; max-width: 100%; }</style><a href="http://suricata-ids.org" class="" rel="" target=""><img width="300" height="300" src="https://idsips.files.wordpress.com/2015/10/suri-400x400.png?w=300" class="image wp-image-907 alignnone attachment-361x300 size-361x300" alt="" style="max-width: 100%; height: auto;" srcset="https://idsips.files.wordpress.com/2015/10/suri-400x400.png?w=300 300w, https://idsips.files.wordpress.com/2015/10/suri-400x400.png?w=150 150w, https://idsips.files.wordpress.com/2015/10/suri-400x400.png 400w" sizes="(max-width: 300px) 100vw, 300px" data-attachment-id="907" data-permalink="https://suricata-ids.org/2016/01/27/suricata-3-0-available/suri-400x400/" data-orig-file="https://idsips.files.wordpress.com/2015/10/suri-400x400.png" data-orig-size="400,400" data-comments-opened="1" data-image-meta="{&quot;aperture&quot;:&quot;0&quot;,&quot;credit&quot;:&quot;&quot;,&quot;camera&quot;:&quot;&quot;,&quot;caption&quot;:&quot;&quot;,&quot;created_timestamp&quot;:&quot;0&quot;,&quot;copyright&quot;:&quot;&quot;,&quot;focal_length&quot;:&quot;0&quot;,&quot;iso&quot;:&quot;0&quot;,&quot;shutter_speed&quot;:&quot;0&quot;,&quot;title&quot;:&quot;&quot;,&quot;orientation&quot;:&quot;0&quot;}" data-image-title="suri-400&#215;400" data-image-description="" data-medium-file="https://idsips.files.wordpress.com/2015/10/suri-400x400.png?w=300" data-large-file="https://idsips.files.wordpress.com/2015/10/suri-400x400.png?w=400" /></a></div></div><!-- /#sidebar --></div><!-- /#content -->
+
+
+	<div id="footer-widgets">
+	<div class="col-full">
+		<div class="block">
+			<div id="search-2" class="widget widget_search"><h3>Search</h3><form role="search" method="get" id="searchform" class="searchform" action="https://suricata-ids.org/">
+				<div>
+					<label class="screen-reader-text" for="s">Search for:</label>
+					<input type="text" value="" name="s" id="s" />
+					<input type="submit" id="searchsubmit" value="Search" />
+				</div>
+			</form></div>		</div>
+		<div class="block">
+			<div id="linkcat-1356" class="widget widget_links"><h3>Links</h3>
+	<ul class='xoxo blogroll'>
+<li><a href="http://www.openinfosecfoundation.org/" title="Open Information Security Foundation">OISF</a></li>
+<li><a href="http://planet.suricata-ids.org/">Planet Suricata</a></li>
+<li><a href="https://redmine.openinfosecfoundation.org/" target="_blank">Redmine development</a></li>
+
+	</ul>
+</div>
+		</div>
+		<div class="block">
+			<div id="blog_subscription-2" class="widget widget_blog_subscription"><h3><label for="subscribe-field">Follow Suricata News via Email</label></h3>
+				<form action="https://subscribe.wordpress.com" method="post" accept-charset="utf-8" id="subscribe-blog">
+											<p>Enter your email address to follow this blog and receive notifications of new posts by email.</p>
+						<p><input type="text" name="email" style="width: 95%; padding: 1px 2px" placeholder="Enter your email address" value="" id="subscribe-field"/></p>
+					
+					<p>
+						<input type="hidden" name="action" value="subscribe"/>
+						<input type="hidden" name="blog_id" value="40452214"/>
+						<input type="hidden" name="source" value="https://suricata-ids.org/"/>
+						<input type="hidden" name="sub-type" value="widget"/>
+						<input type="hidden" name="redirect_fragment" value="blog_subscription-2" />
+						<input type="hidden" id="_wpnonce" name="_wpnonce" value="ee4c7788b0" />						<input type="submit" value="Follow" />
+					</p>
+				</form>
+			
+</div>		</div>
+		<div class="block last">
+			<div id="meta-2" class="widget widget_meta"><h3>Meta</h3>			<ul>
+			<li><a href="https://wordpress.com/start?ref=wplogin">Register</a></li>			<li><a href="https://idsips.wordpress.com/wp-login.php">Log in</a></li>
+			<li><a href="https://suricata-ids.org/feed/">Entries <abbr title="Really Simple Syndication">RSS</abbr></a></li>
+			<li><a href="https://suricata-ids.org/comments/feed/">Comments <abbr title="Really Simple Syndication">RSS</abbr></a></li>
+			<li><a href="https://wordpress.com/" title="Powered by WordPress, state-of-the-art semantic personal publishing platform.">WordPress.com</a></li>			</ul>
+			</div>		</div>
+		<div class="fix"></div>
+	</div>
+</div><!-- /#footer-widgets  -->
+	<div id="footer">
+		<div class="footer-inside">
+			<div id="copyright" class="col-left">
+				<p><a href="https://suricata-ids.org/" title="Suricata" rel="home">Suricata</a></p>
+			</div>
+			<div id="credit" class="col-right">
+				<p><a href="https://wordpress.com/?ref=footer_blog">Blog at WordPress.com.</a> </p>
+			</div>
+			<div class="fix"></div>
+		</div>
+	</div><!-- /#footer  -->
+</div><!-- /#wrapper -->
+<!--  -->
+<script type='text/javascript' src='//0.gravatar.com/js/gprofiles.js?ver=201745y'></script>
+<script type='text/javascript'>
+/* <![CDATA[ */
+var WPGroHo = {"my_hash":""};
+/* ]]> */
+</script>
+<script type='text/javascript' src='https://s1.wp.com/wp-content/mu-plugins/gravatar-hovercards/wpgroho.js?m=1380573781h'></script>
+
+	<script>
+		//initialize and attach hovercards to all gravatars
+		jQuery( document ).ready( function( $ ) {
+
+			if (typeof Gravatar === "undefined"){
+				return;
+			}
+
+			if ( typeof Gravatar.init !== "function" ) {
+				return;
+			}			
+
+			Gravatar.profile_cb = function( hash, id ) {
+				WPGroHo.syncProfileData( hash, id );
+			};
+			Gravatar.my_hash = WPGroHo.my_hash;
+			Gravatar.init( 'body', '#wp-admin-bar-my-account' );
+		});
+	</script>
+
+		<div style="display:none">
+	</div>
+
+	<div id="carousel-reblog-box">
+		<form action="#" name="carousel-reblog">
+			<textarea id="carousel-reblog-content" name="carousel-reblog-content" placeholder="Add your thoughts here... (optional)"></textarea>
+			<label for="carousel-reblog-to-blog-id" id="carousel-reblog-lblogid">Post to</label>
+			<select name="carousel-reblog-to-blog-id" id="carousel-reblog-to-blog-id">
+						</select>
+
+			<div class="submit">
+				<span class="canceltext"><a href="#" class="cancel">Cancel</a></span>
+				<input type="submit" name="carousel-reblog-submit" class="button" id="carousel-reblog-submit" value="Reblog Post" />
+				<input type="hidden" id="carousel-reblog-blog-id" value="40452214" />
+				<input type="hidden" id="carousel-reblog-blog-url" value="https://suricata-ids.org" />
+				<input type="hidden" id="carousel-reblog-blog-title" value="Suricata" />
+				<input type="hidden" id="carousel-reblog-post-url" value="" />
+				<input type="hidden" id="carousel-reblog-post-title" value="" />
+			</div>
+
+			<input type="hidden" id="_wpnonce" name="_wpnonce" value="beb10f3068" /><input type="hidden" name="_wp_http_referer" value="/" />		</form>
+
+		<div class="arrow"></div>
+	</div>
+<script type='text/javascript' src='https://platform.twitter.com/widgets.js?ver=20111117'></script>
+<link rel='stylesheet' id='all-css-0-2' href='https://s1.wp.com/wp-content/mu-plugins/carousel/jetpack-carousel.css?m=1481571546h' type='text/css' media='all' />
+<!--[if lte IE 8]>
+<link rel='stylesheet' id='jetpack-carousel-ie8fix-css'  href='https://s1.wp.com/wp-content/mu-plugins/carousel/jetpack-carousel-ie8fix.css?m=1412618825h&#038;ver=20121024' type='text/css' media='all' />
+<![endif]-->
+<script type='text/javascript'>
+/* <![CDATA[ */
+var actionbardata = {"siteID":"40452214","siteName":"Suricata","siteURL":"https:\/\/suricata-ids.org","icon":"<img alt='' src='https:\/\/secure.gravatar.com\/blavatar\/b35fe77e09a7541f738f500f4db6b857?s=50&d=https%3A%2F%2Fs1.wp.com%2Fi%2Flogo%2Fwpcom-gray-white.png' class='avatar avatar-50' height='50' width='50' \/>","canManageOptions":"","canCustomizeSite":"","isFollowing":"","themeSlug":"pub\/skeptical","signupURL":"https:\/\/wordpress.com\/start\/","loginURL":"https:\/\/idsips.wordpress.com\/wp-login.php?redirect_to=https%3A%2F%2Fsuricata-ids.org%2F","themeURL":"","xhrURL":"https:\/\/suricata-ids.org\/wp-admin\/admin-ajax.php","nonce":"c93264e485","isSingular":"1","isFolded":"","isLoggedIn":"","isMobile":"","subscribeNonce":"<input type=\"hidden\" id=\"_wpnonce\" name=\"_wpnonce\" value=\"ee4c7788b0\" \/>","referer":"https:\/\/suricata-ids.org\/","canFollow":"1","feedID":"4986516","statusMessage":"","customizeLink":"https:\/\/idsips.wordpress.com\/wp-admin\/customize.php?url=https%3A%2F%2Fidsips.wordpress.com%2F","postID":"25","shortlink":"https:\/\/wp.me\/P2JJt4-p","canEditPost":"","editLink":"https:\/\/wordpress.com\/page\/suricata-ids.org\/25","statsLink":"https:\/\/wordpress.com\/stats\/post\/25\/suricata-ids.org","i18n":{"view":"View site","follow":"Follow","following":"Following","edit":"Edit","login":"Log in","signup":"Sign up","customize":"Customize","report":"Report this content","themeInfo":"Get theme: Skeptical","shortlink":"Copy shortlink","copied":"Copied","followedText":"New posts from this site will now appear in your <a href=\"https:\/\/wordpress.com\/\">Reader<\/a>","foldBar":"Collapse this bar","unfoldBar":"Expand this bar","editSubs":"Manage subscriptions","viewReader":"View site in Reader","viewReadPost":"View post in Reader","subscribe":"Sign me up","enterEmail":"Enter your email address","followers":"Join 313 other followers","alreadyUser":"Already have a WordPress.com account? <a href=\"https:\/\/idsips.wordpress.com\/wp-login.php?redirect_to=https%3A%2F%2Fsuricata-ids.org%2F\">Log in now.<\/a>","stats":"Stats"}};
+/* ]]> */
+</script>
+<script type='text/javascript'>
+/* <![CDATA[ */
+var jetpackCarouselStrings = {"widths":[370,700,1000,1200,1400,2000],"is_logged_in":"","lang":"en","ajaxurl":"https:\/\/suricata-ids.org\/wp-admin\/admin-ajax.php","nonce":"badd5681f7","display_exif":"1","display_geo":"1","single_image_gallery":"1","single_image_gallery_media_file":"","background_color":"black","comment":"Comment","post_comment":"Post Comment","write_comment":"Write a Comment...","loading_comments":"Loading Comments...","download_original":"View full size <span class=\"photo-size\">{0}<span class=\"photo-size-times\">\u00d7<\/span>{1}<\/span>","no_comment_text":"Please be sure to submit some text with your comment.","no_comment_email":"Please provide an email address to comment.","no_comment_author":"Please provide your name to comment.","comment_post_error":"Sorry, but there was an error posting your comment. Please try again later.","comment_approved":"Your comment was approved.","comment_unapproved":"Your comment is in moderation.","camera":"Camera","aperture":"Aperture","shutter_speed":"Shutter Speed","focal_length":"Focal Length","comment_registration":"1","require_name_email":"1","login_url":"https:\/\/idsips.wordpress.com\/wp-login.php?redirect_to=https%3A%2F%2Fsuricata-ids.org%2F","blog_id":"40452214","local_comments_commenting_as":"<p id=\"jp-carousel-commenting-as\">You must be <a href=\"#\" class=\"jp-carousel-comment-login\">logged in<\/a> to post a comment.<\/p>","reblog":"Reblog","reblogged":"Reblogged","reblog_add_thoughts":"Add your thoughts here... (optional)","reblogging":"Reblogging...","post_reblog":"Post Reblog","stats_query_args":"blog=40452214&v=wpcom&tz=0&user_id=0&subd=idsips","is_public":"1","reblog_enabled":""};
+/* ]]> */
+</script>
+<script type='text/javascript' src='https://s1.wp.com/_static/??-eJyVkM0OwiAQhF9IuhqtxoPxUQzSjS6FLcLiz9tLE9v00DTxxGaYj1kGXkGZjgVZwCZo8EkGw7uyaQWTK59VcPlGnMBRiwkeGTPeNTcO44LZogRtWrgQG5AXiWBUQh4dMS5wuvHE6qojeJ0KUybVPTFGakr4qP35gsSyS1qCjFDHPTROg7t8wOU+vLSUAvGcbksr8fM7qqlrJsvo2OWEbuhIDUJhzv60qdfH7WFX72v7BdbSnWI='></script>
+<script type="text/javascript">
+// <![CDATA[
+(function() {
+try{
+  if ( window.external &&'msIsSiteMode' in window.external) {
+    if (window.external.msIsSiteMode()) {
+      var jl = document.createElement('script');
+      jl.type='text/javascript';
+      jl.async=true;
+      jl.src='/wp-content/plugins/ie-sitemode/custom-jumplist.php';
+      var s = document.getElementsByTagName('script')[0];
+      s.parentNode.insertBefore(jl, s);
+    }
+  }
+}catch(e){}
+})();
+// ]]>
+</script><script src="//stats.wp.com/w.js?56" type="text/javascript" async defer></script>
+<script type="text/javascript">
+_tkq = window._tkq || [];
+_stq = window._stq || [];
+_tkq.push(['storeContext', {'blog_id':'40452214','blog_tz':'0','user_lang':'en','blog_lang':'en','user_id':'0'}]);
+_stq.push(['view', {'blog':'40452214','v':'wpcom','tz':'0','user_id':'0','post':'25','subd':'idsips'}]);
+_stq.push(['extra', {'crypt':'UE40eW5QN0p8M2Y/RE1TaVhzUzFMbjdWNHpwZGhTayxPSUFCMGNrd29+Smw0TDhnZmRTK0hlRi9QSGh6bi9GXVhBJWIlZlR5U1JMLU8/MkNtblkvY1dDXzBbX0QlLSxWYXdHUVQyK2IyUVA5SjU1bj9VX3ExLHYsREFpcnlfNHYteUhkeUQ4SGk4a2x1SW5LbWRqMzdON014NG03dTMsWD9bV2RNLEItXVR0Z3hHME42VlUwJmFXOU1zblAmaiZGLWpfaUd2NEwlZlZrd1NnTG0xP0xkT3Vafm1qXVtyOF9GP1g2cEszbDJlazBCRE96el1CaS1DPW44fmxFV2EtQix5Y2tqWlR6YVM4UWFMUiVXWmQlb11fcS01alBoRmhWSTc2b0xfSlM0ejNzKys='}]);
+_stq.push([ 'clickTrackerInit', '40452214', '25' ]);
+	</script>
+<noscript><img src="https://pixel.wp.com/b.gif?v=noscript" style="height:0px;width:0px;overflow:hidden" alt="" /></noscript>
+<script>
+if ( 'object' === typeof wpcom_mobile_user_agent_info ) {
+
+	wpcom_mobile_user_agent_info.init();
+	var mobileStatsQueryString = "";
+	
+	if( false !== wpcom_mobile_user_agent_info.matchedPlatformName )
+		mobileStatsQueryString += "&x_" + 'mobile_platforms' + '=' + wpcom_mobile_user_agent_info.matchedPlatformName;
+	
+	if( false !== wpcom_mobile_user_agent_info.matchedUserAgentName )
+		mobileStatsQueryString += "&x_" + 'mobile_devices' + '=' + wpcom_mobile_user_agent_info.matchedUserAgentName;
+	
+	if( wpcom_mobile_user_agent_info.isIPad() )
+		mobileStatsQueryString += "&x_" + 'ipad_views' + '=' + 'views';
+
+	if( "" != mobileStatsQueryString ) {
+		new Image().src = document.location.protocol + '//pixel.wp.com/g.gif?v=wpcom-no-pv' + mobileStatsQueryString + '&baba=' + Math.random();
+	}
+	
+}
+</script></body>
+</html>
+<!--
+	generated 91 seconds ago
+	generated in 0.074 seconds
+	served from batcache in 0.001 seconds
+	expires in 209 seconds
+-->
