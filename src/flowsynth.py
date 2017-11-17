@@ -782,10 +782,10 @@ def output_summary():
     global RUNTIME
     if (ARGS.quiet == False):
         if (ARGS.display == 'text'):
-            print "\n ~~ Build Summary ~~"
-            print "Runtime:\t\t%ss\nOutput format:\t\t%s\nRaw instructions:\t%s\nTimeline events:\t%s\nPackets generated:\t%s\n" % ( RUNTIME, ARGS.output_format, len(COMPILER_INSTRUCTIONS), len(COMPILER_TIMELINE), len(COMPILER_OUTPUT))
+            print("\n ~~ Build Summary ~~")
+            print("Runtime:\t\t%ss\nOutput format:\t\t%s\nRaw instructions:\t%s\nTimeline events:\t%s\nPackets generated:\t%s\n" % ( RUNTIME, ARGS.output_format, len(COMPILER_INSTRUCTIONS), len(COMPILER_TIMELINE), len(COMPILER_OUTPUT)))
         else:
-            print json.dumps(BUILD_STATUS)
+            print(json.dumps(BUILD_STATUS))
 
 def output_handler():
     """ decide what to do about output """
@@ -1004,7 +1004,7 @@ def parser_bailout(msg):
         
 def show_build_status():
     """print the build status to screen"""
-    print json.dumps(BUILD_STATUS)
+    print(json.dumps(BUILD_STATUS))
 
 #application entrypoint
 if __name__ == '__main__':
