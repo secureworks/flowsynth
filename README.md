@@ -4,12 +4,12 @@ Flowsynth is a tool for rapidly modelling network traffic. Flowsynth can be used
 
 ## Installation ##
 
-Flowsynth was developed on Python 2.7. The following python modules are required to run Flowsynth:
+The following python modules are required to run Flowsynth:
 
 +	argparse
 +	scapy
 
-While it may be feasible to run Flowsynth on other versions of Python, this has not been tested.
+Flowsynth has been tested on python 2.7 and python 3. 
 
 ## How it works ##
 
