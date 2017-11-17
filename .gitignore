@@ -102,3 +102,6 @@ ENV/
 
 #Jetbrains IDE
 .idea
+
+#PCAPs
+.pcap
