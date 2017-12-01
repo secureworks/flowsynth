@@ -104,8 +104,6 @@ class FSLexer:
         while len(lexer) > 0:
             token = lexer[0]
             #should be the start of a new line
-            #print "New lexer rotation. Starting with Token %s" % token
-            #print "Tokens are %s" % lexer
             if (token.lower() == 'flow'):
                 (flowdecl, lexer) = self.lex_flow(lexer[1:])
                 self.instructions.append(flowdecl)
@@ -185,8 +183,6 @@ class FSLexer:
         else:
             flow_proto = Flow.PROTO_TCP
 
-        #logging.debug("Building flowdecl")
-
         #start to build our flow decl
         flowdecl = {}
         flowdecl['type'] = 'flow'
@@ -230,7 +226,6 @@ class FSLexer:
                         modifier_key = "%s%s" % (modifier_key, token)
                         tok_ctr = tok_ctr + 1
 
-                #print "ModKey: %s" % modifier_key
                 if (single_modifier == False):
                     modifier_value = ""
                     tok_ctr = 0
@@ -246,10 +241,8 @@ class FSLexer:
 
                 flowdecl['attributes'][modifier_key] = modifier_value
 
-                #print "ModValue: %s" % modifier_value
             tokens = tokens[1:]
-            #print 'Flowdecl: %s' % flowdecl
-            #print 'Tokens: %s' % tokens
+
             return (flowdecl, tokens)
         else:
             parser_bailout("Invalid Syntax. unexpected value %s" % tokens[0])
@@ -271,9 +264,6 @@ class FSLexer:
         flow_directionality = tokens[idx_flowdir]
         tokens = tokens[idx_flowdir+1:]
 
-        #print "Flow name: %s" % flow_name
-        #print "Flow directionality: %s" % flow_directionality
-
         eventdecl = {}
         eventdecl['name'] = flow_name
         eventdecl['type'] = 'event'
@@ -283,8 +273,6 @@ class FSLexer:
             eventdecl['flow'] = Flow.FLOW_TO_SERVER
         else:
             eventdecl['flow'] = Flow.FLOW_TO_CLIENT
-
-        #print "Tokens are %s" % tokens
 
         if (tokens[0] == '('):
             tokens = tokens[1:]
@@ -311,7 +299,6 @@ class FSLexer:
                         modifier_key = "%s%s" % (modifier_key, token)
                         tok_ctr = tok_ctr + 1
 
-                #print "ModKey: %s" % modifier_key
                 if (single_modifier == False):
                     modifier_value = ""
                     tok_ctr = 0
@@ -341,8 +328,7 @@ class FSLexer:
                 else:
                     eventdecl['attributes'][modifier_key] = modifier_value
 
-                #print "ModValue: %s" % modifier_value
-            
+
             #skip trailing ;
             tokens = tokens[1:]
 
@@ -417,12 +403,9 @@ class Flow:
     #This function expects all inputs to be enclosed within double quotes
     def parse_content(self, content):
         """ parse and render a content keyword """
-        #pcre_file = r"file\([^\)]+\)"
-        #pcre_url = r"url\([^\)]+\)"
         pcre_text = r'"([^\\"]*(?:\\.[^\\"]*)*)"'
 
-        #print "CONTENT: %s" % content
-        
+
         #first, check for text
         mo_text = re.match(pcre_text, content)
         if (mo_text != None):
@@ -433,18 +416,8 @@ class Flow:
             for replacement in replacements:
                 content_text = content_text.replace(replacement, chr(int(replacement[2:], 16)))
 
-            # replacements = re.findall(r"\|[A-Fa-f0-9\ ]+\|", content_text)
-            # for replacement in replacements:
-            #     #remove all spaces
-            #     orig_replacement = replacement
-            #     replacement = replacement.replace(" ","").replace("|","")
-            #     replacement_text = ""
-            #     for sub in [replacement[i:i+2] for i in range(0, len(replacement), 2)]:
-            #         #break into groups of two characters
-            #         replacement_text = "%s%s" % (replacement_text, chr(int(sub, base=16)))
-            #     content_text = content_text.replace(orig_replacement, replacement_text)
-
             return content_text
+        return ""
 
     def render_payload(self, event):
         """ render all content matches into one payload value """
@@ -453,8 +426,6 @@ class Flow:
             #logging.debug("Found modifier: %s", modifier)
             keyword = modifier
             value = event['attributes'][keyword]
-
-            #logging.debug("Parsed keyword: %s value: %s", keyword, value)
 
         if 'contents' in event:
             for contentobj in event['contents']:
@@ -617,12 +588,6 @@ class Flow:
                 pkt = lyr_eth / lyr_ip / lyr_tcp
                 pkts.append(pkt)
 
-                # if (event['flow'] == Flow.FLOW_TO_CLIENT):
-                # 	#if flow is to the client, don't increment the PSH ACK, increment the following ack..
-                #     #increment the SEQ based on payload size
-                #     self.tcp_seq = self.tcp_ack
-                #     self.tck_ack = self.tcp_ack + len(payload)
-
                 logging.debug("Payload size is: %s" % len(payload))
                 logging.debug("tcp_seq is %s" % tcp_seq)
                 logging.debug("tcp_ack is %s" % tcp_ack)
@@ -644,28 +609,12 @@ class Flow:
                     self.to_client_ack = self.to_client_seq + len(payload)
                     self.to_client_seq = self.to_client_ack
 
-                    #trying to fix this:
-                    #tcp_ack = self.to_client_seq + len(payload)
-                    #tcp_seq = self.to_client_ack
-                    
-                    #self.to_client_ack = self.to_client_seq + len(payload)
-                    #self.to_client_seq = self.to_client_ack
-
-                    #previously commented out
-                    #self.tcp_server_bytes = self.tcp_server_bytes + len(payload)
-                    #self.to_server_ack = self.to_server_seq + len(payload)
-                    #tcp_seq = self.to_server_ack
-                    #tcp_seq = self.to_client_seq #None
-                    #tcp_ack = self.to_client_ack
                 else:
                     logging.debug('CLIENT requires ACK: Flow is TO_SERVER')
-                    #self.tcp_client_bytes = self.tcp_client_bytes + len(payload)
 
                     tmp_ack = self.to_server_seq
                     tmp_seq = self.to_server_ack
 
-                    #tcp_ack = self.to_server_seq #None
-                    #tcp_seq = self.to_server_ack    #reversed
                     tcp_seq = tcp_ack
                     tcp_ack = tmp_ack + payload_size
                     
@@ -689,8 +638,6 @@ class Flow:
         logging.debug("to_client S: %s A: %s", self.to_client_seq, self.to_client_ack)
         logging.debug("*********************\n\n")
 
-
-        #print hexdump(pkt)
         return pkts
 
 def parse_cmd_line():
@@ -771,7 +718,6 @@ def run(sFile):
     BUILD_STATUS['compiler']['instructions'] = len(COMPILER_INSTRUCTIONS)
     BUILD_STATUS['compiler']['events'] = len(COMPILER_TIMELINE)
     BUILD_STATUS['compiler']['packets'] = len(COMPILER_OUTPUT)
-    #ARGS.output_format, len(COMPILER_INSTRUCTIONS), len(COMPILER_TIMELINE), len(COMPILER_OUTPUT)
     BUILD_STATUS['successful'] = True
 
     #print the summary to the screen
