@@ -371,6 +371,7 @@ class Flow:
     #has test case
     def __init__(self, flowdecl = None):
         """constructor for the flow class. accepts a flowdecl (dictionary) with flow info"""
+
         if (type(flowdecl) != dict):
             parser_bailout("Flowdecl must be a dictionary.")
         try:
@@ -387,6 +388,24 @@ class Flow:
         self.src_mac = RandMAC()
         self.dst_mac = RandMAC()
 
+        #set a user-supplied source and destination mac, if provided
+        if 'src_mac' in flowdecl['attributes']:
+            logging.debug("Using user-supplied source mac")
+            smac = flowdecl['attributes']['src_mac'].lower()
+            if self._valid_mac(smac):
+                self.src_mac = smac
+            else:
+                parser_bailout("A src_mac ({}) was explicitly set, but it doesn't appear to be valid.".format(smac))
+
+        if 'dst_mac' in flowdecl['attributes']:
+            logging.debug("Using user-supplied dest mac")
+            dmac = flowdecl['attributes']['dst_mac'].lower()
+            if self._valid_mac(dmac):
+                self.dst_mac = dmac
+            else:
+                parser_bailout("A dst_mac ({}) was explicitly set, but it doesn't appear to be valid.".format(dmac))
+
+
         self.to_server_seq = random.randint(10000, 99999)
         self.to_client_seq = random.randint(10000, 99999)
         self.to_server_ack = 0
@@ -398,6 +417,13 @@ class Flow:
             self.tcp_mss = int(flowdecl['attributes']['mss'])
         except KeyError:
             self.tcp_mss = 1460
+
+    def _valid_mac(self, mac):
+        mac_re = r'[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}'
+        valid_mac = re.match(mac_re, mac)
+        if valid_mac != None:
+            return True
+        return False
 
     #has test case
     #This function expects all inputs to be enclosed within double quotes
