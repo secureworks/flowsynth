@@ -1,3 +1,2 @@
-scapy ; python_version < '3.0'
-scapy-python3 ; python_version >= '3.4'
+scapy>=2.4.0
 argparse
