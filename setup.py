@@ -7,7 +7,7 @@ setup(
     url="https://github.com/secureworks/flowsynth",
     license="Apache",
     scripts = [
-        "src/flowsynth"
+        "bin/flowsynth"
     ],
     install_requires=['scapy','argparse']
 )
