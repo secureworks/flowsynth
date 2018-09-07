@@ -1,6 +1,7 @@
+
 # Flowsynth #
 
-Flowsynth is a tool for rapidly modelling network traffic. Flowsynth can be used
+Flowsynth is a tool for rapidly modeling network traffic. Flowsynth can be used
 to generate text-based hexdumps of packets as well as native libpcap format
 packet captures.
 
