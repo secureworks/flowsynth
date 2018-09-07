@@ -103,5 +103,8 @@ ENV/
 #Jetbrains IDE
 .idea
 
+# emacs
+*~
+
 #PCAPs
 .pcap
