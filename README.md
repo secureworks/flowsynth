@@ -9,7 +9,7 @@ packet captures.
 
 `pip install .`
 
-If you want to run the source locally without installing, he following python
+If you want to run the source locally without installing, the following python
 modules are required to run Flowsynth:
 
 +	argparse
