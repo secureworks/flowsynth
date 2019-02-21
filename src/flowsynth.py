@@ -35,7 +35,7 @@ import json
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 logging.getLogger("scapy.interactive").setLevel(logging.ERROR)
 logging.getLogger("scapy.loading").setLevel(logging.ERROR)
-from scapy.all import Ether, IP, TCP, UDP, RandMAC, hexdump, wrpcap
+from scapy.all import Ether, IP, IPv6, TCP, UDP, RandMAC, hexdump, wrpcap
 
 #global variables
 APP_VERSION_STRING = "1.0.6"
@@ -93,6 +93,11 @@ class FSLexer:
     instructions = []
     dnscache = {}
 
+    ipv4regex = r"^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$"
+
+    # https://stackoverflow.com/a/17871737
+    ipv6regex = r"^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$"
+
     def __init__(self, synfiledata):
         
         #init
@@ -115,8 +120,7 @@ class FSLexer:
 
     def resolve_dns(self, shost):
         """Perform DNS lookups once per file, and cache the results. tested."""
-        rdns = r"^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$"
-        if (re.match(rdns, shost) == None):
+        if (re.match(self.ipv4regex, shost) == None and re.match(self.ipv6regex, shost) == None):
             if shost in self.dnscache:
                 logging.debug("Host %s in DNSCACHE, returned %s", shost, self.dnscache[shost])
                 shost = self.dnscache[shost]
@@ -142,52 +146,79 @@ class FSLexer:
         #need to read the following mandatory values:
         try:
             flow_name = tokens[0]
-            flow_proto = tokens[1]
+            l4_proto = tokens[1]
             tokens = tokens[2:]
         except IndexError:
             raise SynSyntaxError("Corrupt flowdecl")
 
         flow_src = ""
         tok_ctr = 0
-        for token in tokens:
-            if (token == ':'):
-                break
-            else:
+        if tokens[0] == '[':
+            l3_proto = Flow.PROTO_IPV6
+            tokens = tokens[1:]
+            for token in tokens:
+                tok_ctr = tok_ctr + 1
+                if (token == ']'):
+                    break
+                flow_src = "%s%s" % (flow_src, token)
+        else:
+            l3_proto = Flow.PROTO_IPV4
+            for token in tokens:
+                if (token == ':'):
+                    break
                 flow_src = "%s%s" % (flow_src, token)
                 tok_ctr = tok_ctr + 1
+
         tokens = tokens[tok_ctr+1:]
         try:
             flow_src_port = tokens[0]
         except IndexError:
             raise SynSyntaxError("No flow source port specified")
-
-        directionality = tokens[1]
-        if (directionality != ">" and directionality != "<"):
-            raise SynSyntaxError("Unexpected flow directionality: %s" % directionality)
-
-        tokens = tokens[2:]
-        flow_dst = ""
-        tok_ctr = 0
-        for token in tokens:
-            if (token == ':'):
-                break
-            else:
-                flow_dst = "%s%s" % (flow_dst, token)
-                tok_ctr = tok_ctr + 1
-        tokens = tokens[tok_ctr+1:]
-        flow_dst_port = tokens[0]
         tokens = tokens[1:]
 
-        if (flow_proto.lower() == 'udp'):
-            flow_proto = Flow.PROTO_UDP
+        directionality = tokens[0]
+        if (directionality != ">" and directionality != "<"):
+            raise SynSyntaxError("Unexpected flow directionality: %s" % directionality)
+        tokens = tokens[1:]
+
+        flow_dst = ""
+        tok_ctr = 0
+        if tokens[0] == '[':
+            if l3_proto != Flow.PROTO_IPV6:
+                raise SynSyntaxError("Inconsistent layer 3 protocols")
+            tokens = tokens[1:]
+            for token in tokens:
+                tok_ctr = tok_ctr + 1
+                if (token == ']'):
+                    break
+                flow_dst = "%s%s" % (flow_dst, token)
         else:
-            flow_proto = Flow.PROTO_TCP
+            if l3_proto != Flow.PROTO_IPV4:
+                raise SynSyntaxError("Inconsistent layer 3 protocols")
+            for token in tokens:
+                if (token == ':'):
+                    break
+                flow_dst = "%s%s" % (flow_dst, token)
+                tok_ctr = tok_ctr + 1
+
+        tokens = tokens[tok_ctr+1:]
+        try:
+            flow_dst_port = tokens[0]
+        except IndexError:
+            raise SynSyntaxError("No flow destination port specified")
+        tokens = tokens[1:]
+
+        if (l4_proto.lower() == 'udp'):
+            l4_proto = Flow.PROTO_UDP
+        else:
+            l4_proto = Flow.PROTO_TCP
 
         #start to build our flow decl
         flowdecl = {}
         flowdecl['type'] = 'flow'
         flowdecl['name'] = flow_name
-        flowdecl['proto'] = flow_proto
+        flowdecl['l3_proto'] = l3_proto
+        flowdecl['l4_proto'] = l4_proto
         flowdecl['src_host'] = self.resolve_dns(flow_src)
         flowdecl['src_port'] = flow_src_port
         flowdecl['dst_host'] = self.resolve_dns(flow_dst)
@@ -339,7 +370,11 @@ class FSLexer:
 class Flow:
     """a class for modeling a specific flow"""
 
-    #consts for different protocols
+    #consts for different L3 protocols
+    PROTO_IPV4 = 0
+    PROTO_IPV6 = 1
+
+    #consts for different L4 protocols
     PROTO_TCP = 0
     PROTO_UDP = 1
 
@@ -349,7 +384,8 @@ class Flow:
     FLOW_BIDIRECTIONAL = 2
 
     #specific values for the flow
-    proto = 0
+    l3_proto = 0
+    l4_proto = 0
     flow = 0
     name = ""
     src_mac = ""
@@ -376,7 +412,8 @@ class Flow:
             parser_bailout("Flowdecl must be a dictionary.")
         try:
             self.name = flowdecl['name']
-            self.proto = flowdecl['proto']
+            self.l3_proto = flowdecl['l3_proto']
+            self.l4_proto = flowdecl['l4_proto']
             self.src_host = flowdecl['src_host']
             self.src_port = flowdecl['src_port']
             self.flow = flowdecl['flow']
@@ -517,7 +554,7 @@ class Flow:
 
             if (hasPayload == True):
                 #we have a payload and we are using TCP; observe the MSS
-                if (len(total_payload) > self.tcp_mss and self.proto == Flow.PROTO_TCP):
+                if (len(total_payload) > self.tcp_mss and self.l4_proto == Flow.PROTO_TCP):
                     payload = total_payload[:self.tcp_mss]
                     total_payload = total_payload[self.tcp_mss:]
                 else:
@@ -571,9 +608,12 @@ class Flow:
             pkt = None
             logging.debug("SRC host: %s", src_host)
             logging.debug("DST host: %s", dst_host)
-            lyr_ip = IP(src = src_host, dst = dst_host)
+            if self.l3_proto == Flow.PROTO_IPV4:
+                lyr_ip = IP(src = src_host, dst = dst_host)
+            else:
+                lyr_ip = IPv6(src = src_host, dst = dst_host)
             lyr_eth = Ether(src = src_mac, dst = dst_mac)
-            if (self.proto == Flow.PROTO_UDP):
+            if (self.l4_proto == Flow.PROTO_UDP):
                 #generate udp packet
                 lyr_udp = UDP(sport = src_port, dport = dst_port) / payload
                 pkt = lyr_eth / lyr_ip / lyr_udp
@@ -651,7 +691,10 @@ class Flow:
                 if 'tcp.noack' not in event['attributes']:
                     logging.debug('INFERRED ACK: S:%s A:%s', tcp_seq, tcp_ack)
                     lyr_eth = Ether(src = dst_mac, dst=src_mac)
-                    lyr_ip = IP(src=dst_host, dst=src_host)
+                    if self.l3_proto == Flow.PROTO_IPV4:
+                        lyr_ip = IP(src = dst_host, dst = src_host)
+                    else:
+                        lyr_ip = IPv6(src = dst_host, dst = src_host)
                     lyr_tcp = TCP(sport = dst_port, dport = src_port, flags='A', seq=tcp_seq, ack=tcp_ack)
                     pkt = lyr_eth / lyr_ip / lyr_tcp
                     pkts.append(pkt)
