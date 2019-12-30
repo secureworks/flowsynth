@@ -1,6 +1,6 @@
 # Flowsynth #
 
-Flowsynth is a tool for rapidly modelling network traffic. Flowsynth can be used to generate text-based hexdumps of packets as well as native libpcap format packet captures.
+Flowsynth is a tool for rapidly modeling network traffic. Flowsynth can be used to generate text-based hexdumps of packets as well as native libpcap format packet captures.
 
 ## Installation ##
 
@@ -9,7 +9,7 @@ The following python modules are required to run Flowsynth:
 +	argparse
 +	scapy
 
-Flowsynth has been tested on python 2.7 and python 3. 
+Flowsynth has been tested on Python 2.7 and Python 3.
 
 ## How it works ##
 
@@ -20,8 +20,8 @@ These three phases are referred to as the *parsing phase*, *rendering phase*, an
 Take the following synfile as an example:
 
 	flow default tcp myhost.corp.acme.net:12323 > google.com:80 (	tcp.initialize; );
-	  default > ( content:"GET / HTTP/1.1\x0d\x0a"; content:"Host: google.com\x0d\x0a\x0d\x0a"; );
-	  default < ( content:"HTTP/1.1 200 OK"; );
+	default > ( content:"GET / HTTP/1.1\x0d\x0a"; content:"Host: google.com\x0d\x0a\x0d\x0a"; );
+	default < ( content:"HTTP/1.1 200 OK"; );
 
 This sample contains two types of instructions: Flow declarations and event declarations. The first line (*flow default tcp...*) declares to Flowsynth that a flow is being tracked between myhost.corp.acme.net and google.com. The flow name is *default*. All events that apply to this flow will use this name (*default*) to identify which flow they apply to. The third argument specifies which protocol the flow will use. In this case it's *tcp*. Next we specify the source and destination addresses and ports. Finally, an optional attributes section is included at the end. The *tcp.initialize* attribute is included, which tells Flowsynth to automatically generate a three-way handshake for this flow. It's worth nothing that each attribute and line should be closed with a semicolon (;), as shown above. When this flow declaration instruction is parsed by Flowsynth the application will automatically generate event entries in the compiler timeline to establish a three way handshake.
 
@@ -117,18 +117,18 @@ usage:
 Data can be transferred between hosts using two methods. The example below outlines a data exchange between a client and a webserver:
 
 	my_connection > (content:"GET / HTTP/1.1\x0d\x0aHost:google.com\x0d\x0aUser-Agent: DogBot\x0d\x0a\x0d\x0a";);
-	  my_connection < (content:"HTTP/1.1 200 OK\x0d\x0aContent-Length: 300\x0d\x0a\x0d\x0aWelcome to Google.com!";);
+	my_connection < (content:"HTTP/1.1 200 OK\x0d\x0aContent-Length: 300\x0d\x0a\x0d\x0aWelcome to Google.com!";);
 
 In this example, the flow *my_connection* must have been previously declared. A single packet with the content specified will be transmitted from the client to the server. The following method is also accepted, however, this may change in the future as the syntax is formalized.:
 
 	my_connection.to_server (content:"GET / HTTP/1.1\x0d\x0aHost:google.com\x0d\x0aUser-Agent: DogBot\x0d\x0a\x0d\x0a";);
-	  my_connection.to_client (content:"HTTP/1.1 200 OK\x0d\x0aContent-Length: 300\x0d\x0a\x0d\x0aWelcome to Google.com!";);
+	my_connection.to_client (content:"HTTP/1.1 200 OK\x0d\x0aContent-Length: 300\x0d\x0a\x0d\x0aWelcome to Google.com!";);
 
  Each content keyword within the () should be closed by a semicolon. Each line should also be closed with a semicolon. Failure to do so will generate a lexer error. Multiple content matches can also be used to logically seperate parts of the response, for example:
 
  	# the commands below describe a simple HTTP request
- 	  my_connection > (content:"GET / HTTP/1.1\x0d\x0aHost:google.com\x0d\x0a\x0d\x0a";);
- 	  my_connection < (content:"HTTP/1.1 200 OK\x0d\x0aContent-Type: text/html\x0d\x0a\x0d\x0a"; content:"This is my response body.";);
+ 	my_connection > (content:"GET / HTTP/1.1\x0d\x0aHost:google.com\x0d\x0a\x0d\x0a";);
+ 	my_connection < (content:"HTTP/1.1 200 OK\x0d\x0aContent-Type: text/html\x0d\x0a\x0d\x0a"; content:"This is my response body.";);
 
 #### Event Attributes ####
 The following event attributes are currently supported:
