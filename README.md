@@ -69,6 +69,9 @@ You can declare a flow using the following syntax:
 
 	flow [flow name] [proto] [src]:[srcport] [directionality] [dst]:[dstport] ([flow options]);
 
+
+*src* and *dst* can be IPv4 addresses, IPv6 addresses, or resolvable domain names.  For IPv6, the address(es) must be enclosed in square brackets ('[' and ']').
+
 The following flow declaration would describe a flow going from a computer to google.com:
 
  	flow my_connection tcp mydesktop.corp.acme.com:44123 > google.com:80 (tcp.initialize;);
@@ -76,6 +79,10 @@ The following flow declaration would describe a flow going from a computer to go
 The following flow declaration would describe a flow going from a computer to a DNS server:
 
  	flow dns_request udp  mydesktop.corp.acme.com:11234 > 8.8.8.8:53;
+
+The following flow declaration would describe a flow using IPv6 addresses:
+
+ 	flow default tcp [2600:1337:2800:1:248:1893:25c8:d1]:31337 > [2600:1337:2800::f1]:80 (tcp.initialize;);
 
 For the interim, directionality should always be specified as to server: >
 
@@ -175,4 +182,4 @@ The *tcp.flags.rst* attribute tells Flowsynth to force the packet to be a RST pa
 
 +	David Wharton
 +	@2xyo
-
++	@bhaan
