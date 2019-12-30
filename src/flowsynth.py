@@ -80,7 +80,7 @@ class SynCompileError(Exception):
 
 class FSLexer:
     """a lexer for the synfile format"""
-    
+
     LEX_NEW = 0
     LEX_EXISTING = 1
 
@@ -99,7 +99,7 @@ class FSLexer:
     ipv6regex = r"^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$"
 
     def __init__(self, synfiledata):
-        
+
         #init
         self.instructions = []
         self.dnscache = {}
@@ -135,7 +135,7 @@ class FSLexer:
                 except socket.gaierror:
                     compiler_bailout("Cannot resolve %s" % shost)
         return shost
-            
+
     def lex_flow(self, tokens):
         """ lex flow declarations"""
         logging.debug("lex_flow() called with %s", tokens)
@@ -288,7 +288,7 @@ class FSLexer:
             if (tokens[1] == '.'):
                 idx_flowdir = 2
             else:
-                idx_flowdir = 1        
+                idx_flowdir = 1
         except IndexError:
             parser_bailout("Invalid Syntax. Unexpected flow directionality.")
 
@@ -473,7 +473,7 @@ class Flow:
         mo_text = re.match(pcre_text, content)
         if (mo_text != None):
             logging.debug("Content: %s", mo_text.group(1))
-        
+
             content_text = mo_text.group(1)
             replacements = re.findall(r"\\x[a-fA-F0-9]{2}", content_text)
             for replacement in replacements:
@@ -535,7 +535,7 @@ class Flow:
 
     def render(self, eventid):
         """ render a specific eventid """
-        
+
         event = self.timeline[eventid]
         pkts = []
 
@@ -578,7 +578,7 @@ class Flow:
                 tcp_ack = self.to_server_ack
                 logging.debug("*** Flow %s --> S:%s A:%s B:%s", self.name, tcp_seq, tcp_ack, self.tcp_server_bytes)
                 logging.debug("*** %s", self.timeline[eventid])
-                
+
                 #nooooooooooo
                 if (len(payload) > 0):
                     #set tcp ack to last ack
@@ -621,7 +621,7 @@ class Flow:
             else:
                 #generate tcp packet
                 logging.debug("TCP Packet")
-                
+
                 #handle SEQ
                 if 'tcp.seq' in event['attributes']:
                     logging.debug("tcp.seq has been set manually")
@@ -671,7 +671,7 @@ class Flow:
 
                     tcp_seq = tcp_ack
                     tcp_ack = self.to_client_seq + len(payload)
-                    
+
                     self.to_client_ack = self.to_client_seq + len(payload)
                     self.to_client_seq = self.to_client_ack
 
@@ -683,7 +683,7 @@ class Flow:
 
                     tcp_seq = tcp_ack
                     tcp_ack = tmp_ack + payload_size
-                    
+
 
                     self.to_server_ack = self.to_server_seq + payload_size
                     self.to_server_seq = self.to_server_ack
@@ -748,7 +748,7 @@ def main():
 
     run(ARGS.input)
 
-    
+
 def run(sFile):
     """ executes the compiler """
     global BUILD_STATUS
@@ -1016,7 +1016,7 @@ def parser_bailout(msg):
             sys.exit(-1)
     except AttributeError:
         raise SynSyntaxError(msg)
-        
+
 def show_build_status():
     """print the build status to screen"""
     print(json.dumps(BUILD_STATUS))
