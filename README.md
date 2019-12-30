@@ -80,7 +80,7 @@ The following flow declaration would describe a flow going from a computer to a 
 
  	flow dns_request udp  mydesktop.corp.acme.com:11234 > 8.8.8.8:53;
 
-The following flow declaration would describle a flow using IPv6 addresses:
+The following flow declaration would describe a flow using IPv6 addresses:
 
  	flow default tcp [2600:1337:2800:1:248:1893:25c8:d1]:31337 > [2600:1337:2800::f1]:80 (tcp.initialize;);
 
