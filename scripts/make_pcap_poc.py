@@ -1,9 +1,9 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 """
 make_pcap_poc.py - A tool that takes a file and creates a pcap of that
 file being downloaded over HTTP. Originally created to make
 pcaps from proof of concept exploit files related to particular CVEs.
-This uses flowsynth to make the pcap.
+This uses flowsynth to make the pcap (pip install flowsynth).
 """
 # Copyright 2017 Secureworks
 #
