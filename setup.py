@@ -4,8 +4,8 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setup(
-    name="flowsynth-dwharton",
-    version="1.17",
+    name="flowsynth",
+    version="1.3.0",
     author="Will Urbanski",
     maintainer="David Wharton",
     maintainer_email="counterthreatunit@users.noreply.github.com",
