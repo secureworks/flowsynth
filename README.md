@@ -2,7 +2,7 @@
 
 Flowsynth is a tool for rapidly modeling network traffic. Flowsynth can be used to generate text-based hexdumps of packets as well as native libpcap format packet captures.
 
-## Installation ##
+## Installation and Usage Overview ##
 
 Flowsynth has been tested on Python 2.7 and Python 3.
 
@@ -48,7 +48,7 @@ Example usage:
     fsmodel = flowsynth.Model(input="my.synth", output_file="out.pcap", output_format="pcap")
     fsmodel.build()
 
-The Model class function executes flowsynth and the class constructor takes the same arguments as the script (see above):
+The Model class function `build()` executes flowsynth and the class constructor takes the same arguments as the script (see above):
 
     class Model():
         def __init__(self, input, output_format="pcap", output_file="", quiet=False, debug=False, display="text", no_filecontent=False):
