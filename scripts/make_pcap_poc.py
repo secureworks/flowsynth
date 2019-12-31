@@ -115,10 +115,9 @@ fs_fh.write("""default < (content:\"HTTP/1.1 200 OK\\x0D\\x0AServer: FlowSynth (
 # important - reset file pointer so we can read from the top
 fs_fh.seek(0)
 
-fs_args = "flowsynth.py \"%s\" -f pcap -w \"%s\"" % (fs_fh.name, os.path.abspath(pcap_file))
-sys.argv = shlex.split(fs_args)
+model = flowsynth.Model(input=fs_fh.name, output_format="pcap", output_file=os.path.abspath(pcap_file))
 
-flowsynth.main()
+model.build()
 
 fs_fh.close()
 

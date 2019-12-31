@@ -4,12 +4,57 @@ Flowsynth is a tool for rapidly modeling network traffic. Flowsynth can be used 
 
 ## Installation ##
 
+Flowsynth has been tested on Python 2.7 and Python 3.
+
+### Python Script ###
+
 The following python modules are required to run Flowsynth:
 
 +	argparse
 +	scapy
 
-Flowsynth has been tested on Python 2.7 and Python 3.
+To install requirements with pip:
+
+    pip install -r requirements.txt
+
+Usage:
+
+    usage: flowsynth.py [-h] [-f OUTPUT_FORMAT] [-w OUTPUT_FILE] [-q] [-d]
+                        [--display {text,json}] [--no-filecontent]
+                        input
+
+    positional arguments:
+      input                 input files
+    
+    optional arguments:
+      -h, --help            show this help message and exit
+      -f OUTPUT_FORMAT      Output format. Valid output formats include: hex, pcap
+      -w OUTPUT_FILE        Output file.
+      -q                    Run silently
+      -d                    Run in debug mode
+      --display {text,json}
+                            Display format
+      --no-filecontent      Disable support for the filecontent attribute
+
+### Python Module ###
+
+Flowsynth can also be installed and used as a Python module:
+
+    pip install flowsynth
+
+Example usage:
+
+    import flowsynth
+    fsmodel = flowsynth.Model(input="my.synth", output_file="out.pcap", output_format="pcap")
+    fsmodel.build()
+
+The Model class function executes flowsynth and the class constructor takes the same arguments as the script (see above):
+
+    class Model():
+        def __init__(self, input, output_format="pcap", output_file="", quiet=False, debug=False, display="text", no_filecontent=False):
+        ...
+
+*Note:* Because of the current less-than-ideal use of global variables instead of class variables, if more than one Model object is used concurrently, there will be issues. Hopefully this limitation will be remedied in a future release.
 
 ## How it works ##
 
@@ -74,15 +119,15 @@ You can declare a flow using the following syntax:
 
 The following flow declaration would describe a flow going from a computer to google.com:
 
- 	flow my_connection tcp mydesktop.corp.acme.com:44123 > google.com:80 (tcp.initialize;);
+    flow my_connection tcp mydesktop.corp.acme.com:44123 > google.com:80 (tcp.initialize;);
 
 The following flow declaration would describe a flow going from a computer to a DNS server:
 
- 	flow dns_request udp  mydesktop.corp.acme.com:11234 > 8.8.8.8:53;
+    flow dns_request udp  mydesktop.corp.acme.com:11234 > 8.8.8.8:53;
 
 The following flow declaration would describe a flow using IPv6 addresses:
 
- 	flow default tcp [2600:1337:2800:1:248:1893:25c8:d1]:31337 > [2600:1337:2800::f1]:80 (tcp.initialize;);
+    flow default tcp [2600:1337:2800:1:248:1893:25c8:d1]:31337 > [2600:1337:2800::f1]:80 (tcp.initialize;);
 
 For the interim, directionality should always be specified as to server: >
 
@@ -126,9 +171,9 @@ In this example, the flow *my_connection* must have been previously declared. A 
 
  Each content keyword within the () should be closed by a semicolon. Each line should also be closed with a semicolon. Failure to do so will generate a lexer error. Multiple content matches can also be used to logically seperate parts of the response, for example:
 
- 	# the commands below describe a simple HTTP request
- 	my_connection > (content:"GET / HTTP/1.1\x0d\x0aHost:google.com\x0d\x0a\x0d\x0a";);
- 	my_connection < (content:"HTTP/1.1 200 OK\x0d\x0aContent-Type: text/html\x0d\x0a\x0d\x0a"; content:"This is my response body.";);
+    # the commands below describe a simple HTTP request
+    my_connection > (content:"GET / HTTP/1.1\x0d\x0aHost:google.com\x0d\x0a\x0d\x0a";);
+    my_connection < (content:"HTTP/1.1 200 OK\x0d\x0aContent-Type: text/html\x0d\x0a\x0d\x0a"; content:"This is my response body.";);
 
 #### Event Attributes ####
 The following event attributes are currently supported:

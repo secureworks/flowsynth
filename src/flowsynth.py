@@ -38,7 +38,7 @@ logging.getLogger("scapy.loading").setLevel(logging.ERROR)
 from scapy.all import Ether, IP, IPv6, TCP, UDP, RandMAC, hexdump, wrpcap
 
 #global variables
-APP_VERSION_STRING = "1.0.6"
+APP_VERSION_STRING = "1.3.0"
 LOGGING_LEVEL = logging.INFO
 ARGS = None
 
@@ -748,6 +748,46 @@ def main():
 
     run(ARGS.input)
 
+class Model():
+    """main class."""
+
+    def __init__(self, input, output_format="pcap", output_file="", quiet=False, debug=False, display="text", no_filecontent=False):
+        """constructor"""
+        global ARGS, LOGGING_LEVEL, COMPILER_FLOWS, COMPILER_OUTPUT, COMPILER_TIMELINE, START_TIME, END_TIME, BUILD_STATUS
+
+        # reset globals. A dirty hack for when this is used as a module ... these really should be class variables
+        # but I don't feel like updating all the code at the moment. If more than one Model object is used concurrently,
+        # there will be issues....
+        LOGGING_LEVEL = logging.INFO
+        ARGS = None
+        COMPILER_FLOWS = {}
+        COMPILER_OUTPUT = []
+        COMPILER_TIMELINE = []
+        START_TIME = 0
+        END_TIME = 0
+        BUILD_STATUS = {}
+
+        ARGS = argparse.Namespace()
+        ARGS.input = input
+        ARGS.output_format = output_format
+        ARGS.output_file = output_file
+        ARGS.quiet = quiet
+        ARGS.debug = debug
+        ARGS.display = display
+        ARGS.no_filecontent = no_filecontent
+
+        if (ARGS.debug == True):
+            LOGGING_LEVEL = logging.DEBUG
+        elif (ARGS.quiet == True):
+            LOGGING_LEVEL = logging.CRITICAL
+
+        logging.basicConfig(format='%(levelname)s: %(message)s', level=LOGGING_LEVEL)
+
+    def build(self):
+        global START_TIME
+
+        START_TIME = time.time()
+        run(ARGS.input)
 
 def run(sFile):
     """ executes the compiler """
@@ -983,7 +1023,7 @@ def load_syn_file(filename):
         filedata = fptr.read()
         fptr.close()
     except IOError:
-        compiler_bailout("Cannot open file ('%s')", filename)
+        compiler_bailout("Cannot open file ('%s')" % filename)
 
     return filedata
 
