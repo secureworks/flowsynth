@@ -6,16 +6,10 @@ Flowsynth is a tool for rapidly modeling network traffic. Flowsynth can be used 
 
 Flowsynth has been tested on Python 2.7 and Python 3.
 
+`pip install flowsynth` to install the wheel.
+
 ### Python Script ###
 
-The following python modules are required to run Flowsynth:
-
-+	argparse
-+	scapy
-
-To install requirements with pip:
-
-    pip install -r requirements.txt
 
 Usage:
 
@@ -25,7 +19,7 @@ Usage:
 
     positional arguments:
       input                 input files
-    
+
     optional arguments:
       -h, --help            show this help message and exit
       -f OUTPUT_FORMAT      Output format. Valid output formats include: hex, pcap
@@ -38,9 +32,6 @@ Usage:
 
 ### Python Module ###
 
-Flowsynth can also be installed and used as a Python module:
-
-    pip install flowsynth
 
 Example usage:
 
@@ -64,9 +55,9 @@ These three phases are referred to as the *parsing phase*, *rendering phase*, an
 
 Take the following synfile as an example:
 
-	flow default tcp myhost.corp.acme.net:12323 > google.com:80 (	tcp.initialize; );
-	default > ( content:"GET / HTTP/1.1\x0d\x0a"; content:"Host: google.com\x0d\x0a\x0d\x0a"; );
-	default < ( content:"HTTP/1.1 200 OK"; );
+    flow default tcp myhost.corp.acme.net:12323 > google.com:80 (   tcp.initialize; );
+    default > ( content:"GET / HTTP/1.1\x0d\x0a"; content:"Host: google.com\x0d\x0a\x0d\x0a"; );
+    default < ( content:"HTTP/1.1 200 OK"; );
 
 This sample contains two types of instructions: Flow declarations and event declarations. The first line (*flow default tcp...*) declares to Flowsynth that a flow is being tracked between myhost.corp.acme.net and google.com. The flow name is *default*. All events that apply to this flow will use this name (*default*) to identify which flow they apply to. The third argument specifies which protocol the flow will use. In this case it's *tcp*. Next we specify the source and destination addresses and ports. Finally, an optional attributes section is included at the end. The *tcp.initialize* attribute is included, which tells Flowsynth to automatically generate a three-way handshake for this flow. It's worth nothing that each attribute and line should be closed with a semicolon (;), as shown above. When this flow declaration instruction is parsed by Flowsynth the application will automatically generate event entries in the compiler timeline to establish a three way handshake.
 
@@ -83,11 +74,11 @@ Once all of the events have been rendered to native pcaps the output phase occur
 
 ## Usage ##
 
-	flowsynth.py input.syn
+    flowsynth.py input.syn
 
 In this most basic example, Flowsynth will read input.syn and output the resulting hexdump to the screen. By default Flowsynth will use 'hex' format.
 
-	flowsynth.py input.syn -f pcap -w /tmp/test.pcap
+    flowsynth.py input.syn -f pcap -w /tmp/test.pcap
 
 In this example, Flowsynth reads input.syn and outputs a libpcap formatted .pcap file to /tmp/test.pcap
 
@@ -95,9 +86,9 @@ In this example, Flowsynth reads input.syn and outputs a libpcap formatted .pcap
 ## Syntax ##
 All Flowsynth syntax files are plain-text files. Currently three types of instructions are supported.
 
-+	Comments
-+	Flow Declarations
-+	Event Declarations
++   Comments
++   Flow Declarations
++   Event Declarations
 
 As new features are added, this syntax reference will be updated.
 
@@ -105,14 +96,14 @@ As new features are added, this syntax reference will be updated.
 
 Comments are supported using the *#* symbol.
 
-	# This is a synfile comment
+    # This is a synfile comment
 
 ### Flows ###
 
 #### Declaring a Flow ####
 You can declare a flow using the following syntax:
 
-	flow [flow name] [proto] [src]:[srcport] [directionality] [dst]:[dstport] ([flow options]);
+    flow [flow name] [proto] [src]:[srcport] [directionality] [dst]:[dstport] ([flow options]);
 
 
 *src* and *dst* can be IPv4 addresses, IPv6 addresses, or resolvable domain names.  For IPv6, the address(es) must be enclosed in square brackets ('[' and ']').
@@ -161,13 +152,13 @@ usage:
 #### Transferring Data ####
 Data can be transferred between hosts using two methods. The example below outlines a data exchange between a client and a webserver:
 
-	my_connection > (content:"GET / HTTP/1.1\x0d\x0aHost:google.com\x0d\x0aUser-Agent: DogBot\x0d\x0a\x0d\x0a";);
-	my_connection < (content:"HTTP/1.1 200 OK\x0d\x0aContent-Length: 300\x0d\x0a\x0d\x0aWelcome to Google.com!";);
+    my_connection > (content:"GET / HTTP/1.1\x0d\x0aHost:google.com\x0d\x0aUser-Agent: DogBot\x0d\x0a\x0d\x0a";);
+    my_connection < (content:"HTTP/1.1 200 OK\x0d\x0aContent-Length: 300\x0d\x0a\x0d\x0aWelcome to Google.com!";);
 
 In this example, the flow *my_connection* must have been previously declared. A single packet with the content specified will be transmitted from the client to the server. The following method is also accepted, however, this may change in the future as the syntax is formalized.:
 
-	my_connection.to_server (content:"GET / HTTP/1.1\x0d\x0aHost:google.com\x0d\x0aUser-Agent: DogBot\x0d\x0a\x0d\x0a";);
-	my_connection.to_client (content:"HTTP/1.1 200 OK\x0d\x0aContent-Length: 300\x0d\x0a\x0d\x0aWelcome to Google.com!";);
+    my_connection.to_server (content:"GET / HTTP/1.1\x0d\x0aHost:google.com\x0d\x0aUser-Agent: DogBot\x0d\x0a\x0d\x0a";);
+    my_connection.to_client (content:"HTTP/1.1 200 OK\x0d\x0aContent-Length: 300\x0d\x0a\x0d\x0aWelcome to Google.com!";);
 
  Each content keyword within the () should be closed by a semicolon. Each line should also be closed with a semicolon. Failure to do so will generate a lexer error. Multiple content matches can also be used to logically seperate parts of the response, for example:
 
@@ -178,28 +169,28 @@ In this example, the flow *my_connection* must have been previously declared. A 
 #### Event Attributes ####
 The following event attributes are currently supported:
 
-+	content
-+	filecontent
-+	tcp.seq
-+	tcp.ack
-+	tcp.noack
-+	tcp.flags.syn
-+	tcp.flags.ack
-+	tcp.flags.rst
++   content
++   filecontent
++   tcp.seq
++   tcp.ack
++   tcp.noack
++   tcp.flags.syn
++   tcp.flags.ack
++   tcp.flags.rst
 
 ##### Content Attribute #####
 The *content* attribute is used to specify the payload of a packet. Content attributes must be enclosed in double quotes. Special characters can be expressed in hex, like: *\x0d\x0a*. Anything prefaced with \x will be converted from hex to its ascii representation. These translation takes place during the render phase.
 
 Example:
 
-	default > ( content: "GET / HTTP/1.1\x0d\x0a"; );
+    default > ( content: "GET / HTTP/1.1\x0d\x0a"; );
 
 ##### Filecontent Attribute #####
 The *filecontent* attribute is used to specify a file that can be used as the payload of a packet. The value of a filecontent attribute is the file that will be read into the payload.
 
 Example:
 
-	default > ( content: "HTTP/1.1 200 OK\x0d\x0a\x0d\x0a"; filecontent: "index.html"; );
+    default > ( content: "HTTP/1.1 200 OK\x0d\x0a\x0d\x0a"; filecontent: "index.html"; );
 
 ##### tcp.seq Attribute #####
 The *tcp.seq* attribute lets you set the sequence number for the event's packet.
@@ -221,10 +212,11 @@ The *tcp.flags.rst* attribute tells Flowsynth to force the packet to be a RST pa
 
 ## Authors ###
 
-+	Will Urbanski (will dot urbanski at gmail dot com)
++   Will Urbanski (will dot urbanski at gmail dot com)
 
 #### Contributors ####
 
-+	David Wharton
-+	@2xyo
-+	@bhaan
++   David Wharton
++   @2xyo
++   @bhaan
++   Brad Crittenden (@bac)

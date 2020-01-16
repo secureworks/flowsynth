@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="flowsynth",
-    version="1.3.0",
+    version="1.3.1",
     author="Will Urbanski",
     maintainer="David Wharton",
     maintainer_email="counterthreatunit@users.noreply.github.com",
@@ -15,6 +15,7 @@ setup(
     url="https://github.com/secureworks/flowsynth",
     package_dir={"flowsynth": "src"},
     packages=["flowsynth"],
+    scripts=["src/flowsynth.py"],
     install_requires=[
         "scapy>=2.4.0",
         "argparse",
@@ -35,4 +36,5 @@ setup(
         'Documentation': 'https://github.com/secureworks/flowsynth/blob/master/README.md',
         'Source': 'https://github.com/secureworks/flowsynth',
     },
+    zip_safe=False,
 )

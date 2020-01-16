@@ -38,7 +38,7 @@ logging.getLogger("scapy.loading").setLevel(logging.ERROR)
 from scapy.all import Ether, IP, IPv6, TCP, UDP, RandMAC, hexdump, wrpcap
 
 #global variables
-APP_VERSION_STRING = "1.3.0"
+APP_VERSION_STRING = "1.3.1"
 LOGGING_LEVEL = logging.INFO
 ARGS = None
 
@@ -919,7 +919,7 @@ def process_instructions(instr):
                 add_flow(name, instr)
 
                 if 'tcp.initialize' in instr['attributes']:
-                    #add tcp establishment 
+                    #add tcp establishment
                     autogen_handshake(instr)
 
             else:
