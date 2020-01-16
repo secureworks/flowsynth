@@ -1,37 +1,38 @@
-#!/usr/bin/env python
-
 from setuptools import setup, find_packages
 
-install_requires = [
-    'scapy>=2.4.0',
-    'argparse',
-]
+with open("README.md", "r") as fh:
+    long_description = fh.read()
 
-print find_packages()
-
-if __name__ == '__main__':
-    setup(
-        name='flowsynth',
-        version='0.1',
-        description='Tool for rapidly modelling network traffic.',
-        author='Will Urbanski',
-        author_email='will.urbanski@gmail.com',
-        install_requires=install_requires,
-        license='Apache License 2.0',
-        url='https://github.com/secureworks/flowsynth',
-        packages=find_packages(),
-        scripts=[
-            'flowsynth/flowsynth.py',
-        ],
-        classifiers=[
-            'Development Status :: 5 - Production/Stable',
-            'Environment :: Console',
-            'Intended Audience :: Developers',
-            'Programming Language :: Python',
-            'Programming Language :: Python :: 2',
-            'Programming Language :: Python :: 3',
-            'Topic :: Software Development :: Libraries',
-            'Topic :: System :: Networking'
-        ],
-        zip_safe=False,
-    )
+setup(
+    name="flowsynth",
+    version="1.3.0",
+    author="Will Urbanski",
+    maintainer="David Wharton",
+    maintainer_email="counterthreatunit@users.noreply.github.com",
+    description="Flowsynth is a tool for rapidly modeling network traffic. Flowsynth can be used to generate text-based hexdumps of packets as well as native libpcap format packet captures.",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
+    url="https://github.com/secureworks/flowsynth",
+    package_dir={"flowsynth": "src"},
+    packages=["flowsynth"],
+    install_requires=[
+        "scapy>=2.4.0",
+        "argparse",
+    ],
+    classifiers=[
+        "Development Status :: 5 - Production/Stable",
+        "Programming Language :: Python :: 2.7",
+        "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: Apache Software License",
+        "Operating System :: OS Independent",
+        "Intended Audience :: Information Technology",
+        "Intended Audience :: Developers",
+        "Topic :: System :: Networking",
+    ],
+    python_requires='>=2.7',
+    keywords='pcap, pcaps, packet capture, libpcap, IDS, IPS, packets, scapy',
+    project_urls={
+        'Documentation': 'https://github.com/secureworks/flowsynth/blob/master/README.md',
+        'Source': 'https://github.com/secureworks/flowsynth',
+    },
+)

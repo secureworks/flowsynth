@@ -1,9 +1,9 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 """
 make_pcap_poc.py - A tool that takes a file and creates a pcap of that
 file being downloaded over HTTP. Originally created to make
 pcaps from proof of concept exploit files related to particular CVEs.
-This uses flowsynth to make the pcap.
+This uses flowsynth to make the pcap (pip install flowsynth).
 """
 # Copyright 2017 Secureworks
 #
@@ -38,10 +38,10 @@ cve_re = re.compile(r"(?P<CVE>CVE[\x2D\x5F]?\d{2,4}[\x2D\x5F]?\d{1,6})", re.IGNO
 def print_debug(msg):
     global DEBUG
     if msg and DEBUG:
-        print "\t%s" % msg
+        print("\t%s" % msg)
 
 def print_error(msg):
-    print "ERROR! %s" % msg
+    print("ERROR! %s" % msg)
     sys.exit(1)
 
 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! #
@@ -56,11 +56,11 @@ except:
         print_error("FlowSynth script file \'%s\' does not exist! Update the path in this script (%s)." % (flowsynth_script, sys.argv[0]))
     try:
         flowsynth = imp.load_source('flowsynth', flowsynth_script)
-    except Exception, e:
+    except Exception as e:
         print_error("Could not import flowsynth or load from file \'%s\'. Error:\n%s" % (flowsynth_script, e))
 
 def usage():
-    print "Usage: make_pcap_poc.py <poc_file> [<output_file>]"
+    print("Usage: make_pcap_poc.py <poc_file> [<output_file>]")
     sys.exit(1)
 
 if len(sys.argv) < 2:
@@ -77,7 +77,7 @@ result = cve_re.search(os.path.abspath(poc_file))
 if result:
     cve = result.group('CVE')
 
-print "Creating pcap for %s" % cve
+print("Creating pcap for %s" % cve)
 
 if len(sys.argv) > 2:
     pcap_file = sys.argv[2]
@@ -85,7 +85,7 @@ else:
     pcap_file = "%s_%s.pcap" % (cve, os.getpid())
 
 # make the flowsynth file
-fs_fh = tempfile.NamedTemporaryFile()
+fs_fh = tempfile.NamedTemporaryFile(mode='w')
 print_debug("FlowSynth file: %s" % fs_fh.name)
 
 client_ip = "192.168.%d.%d" % (random.randint(0,255), random.randint(0,255))
@@ -115,12 +115,11 @@ fs_fh.write("""default < (content:\"HTTP/1.1 200 OK\\x0D\\x0AServer: FlowSynth (
 # important - reset file pointer so we can read from the top
 fs_fh.seek(0)
 
-fs_args = "flowsynth.py \"%s\" -f pcap -w \"%s\"" % (fs_fh.name, os.path.abspath(pcap_file))
-sys.argv = shlex.split(fs_args)
+model = flowsynth.Model(input=fs_fh.name, output_format="pcap", output_file=os.path.abspath(pcap_file))
 
-flowsynth.main()
+model.build()
 
 fs_fh.close()
 
-print "Done. Wrote pcap to:\n%s" % pcap_file
+print("Done. Wrote pcap to:\n%s" % pcap_file)
 
