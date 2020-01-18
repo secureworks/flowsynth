@@ -18,8 +18,7 @@
 
    author: Will Urbanski <will.urbanski@gmail.com>
 """
-
-
+from __future__ import print_function
 
 import argparse
 import logging
@@ -39,6 +38,8 @@ from scapy.all import Ether, IP, IPv6, TCP, UDP, RandMAC, hexdump, wrpcap
 
 #global variables
 APP_VERSION_STRING = "1.3.1"
+# Define the standard version indicator.
+__version__ = APP_VERSION_STRING
 LOGGING_LEVEL = logging.INFO
 ARGS = None
 
