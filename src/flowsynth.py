@@ -35,7 +35,7 @@ import json
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 logging.getLogger("scapy.interactive").setLevel(logging.ERROR)
 logging.getLogger("scapy.loading").setLevel(logging.ERROR)
-from scapy.all import Ether, IP, IPv6, TCP, UDP, RandMAC, hexdump, wrpcap
+from scapy.all import Ether, IP, IPv6, TCP, UDP, RandMAC, hexdump, wrpcap, Raw
 
 #global variables
 APP_VERSION_STRING = "1.3.1"
@@ -613,11 +613,19 @@ class Flow:
             else:
                 lyr_ip = IPv6(src = src_host, dst = dst_host)
             lyr_eth = Ether(src = src_mac, dst = dst_mac)
+            # the 'payload' variable is type str [sic] so here we put the payload into a bytearray
+            # and pass it to scapy using Raw(). If we don't do this, we can end up with situations
+            # where bytes (e.g. entered with hex encoding) can get interpreted as multi-byte UTF8
+            # when passed to scapy which is not the desired behavior.
+            payload_bytes = bytearray()
+            payload_bytes.extend(map(ord,payload))
             if (self.l4_proto == Flow.PROTO_UDP):
                 #generate udp packet
-                lyr_udp = UDP(sport = src_port, dport = dst_port) / payload
+                lyr_udp = UDP(sport = src_port, dport = dst_port) / Raw(payload_bytes)
                 pkt = lyr_eth / lyr_ip / lyr_udp
                 pkts.append(pkt)
+
+                logging.debug("Payload size is: %d" % len(payload))
             else:
                 #generate tcp packet
                 logging.debug("TCP Packet")
@@ -650,11 +658,11 @@ class Flow:
                     flags = 'PA'
 
                 logging.debug('Data packet with inferred flags S:%s A:%s', tcp_seq, tcp_ack)
-                lyr_tcp = TCP(flags=flags, seq=tcp_seq, ack=tcp_ack, sport = src_port, dport = dst_port) / payload
+                lyr_tcp = TCP(flags=flags, seq=tcp_seq, ack=tcp_ack, sport = src_port, dport = dst_port) / Raw(payload_bytes)
                 pkt = lyr_eth / lyr_ip / lyr_tcp
                 pkts.append(pkt)
 
-                logging.debug("Payload size is: %s" % len(payload))
+                logging.debug("Payload size is: %d" % len(payload))
                 logging.debug("tcp_seq is %s" % tcp_seq)
                 logging.debug("tcp_ack is %s" % tcp_ack)
                 payload_size = len(payload)
@@ -711,6 +719,8 @@ class Flow:
 
 def parse_cmd_line():
     """ use ArgumentParser to parse command line arguments """
+
+    global LOGGING_LEVEL
 
     app_description = "FlowSynth v%s\nWill Urbanski <will.urbanski@gmail.com>\n\na tool for rapidly modeling network traffic" % APP_VERSION_STRING
 
