@@ -179,7 +179,7 @@ The following event attributes are currently supported:
 +   tcp.flags.rst
 
 ##### Content Attribute #####
-The *content* attribute is used to specify the payload of a packet. Content attributes must be enclosed in double quotes. Special characters can be expressed in hex, like: *\x0d\x0a*. Anything prefaced with \x will be converted from hex to its ascii representation. These translation takes place during the render phase.
+The *content* attribute is used to specify the payload of a packet. Content attributes must be enclosed in double quotes. UTF-8 is supported and arbitrary bytes can be expressed with the "\xHH" notation where "HH" is the hexidecimal representation of the byte. For example, a carriage return (ASCII 0x0D) followed by a line feed (ASCII 0x0A) can be defined like this: *\x0D\x0A*.  This translation takes place during the render phase.
 
 Example:
 

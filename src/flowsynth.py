@@ -479,6 +479,9 @@ class Flow:
             logging.debug("Content: %s (length %d)" % (content_text, len(content_text)))
             start = 0
             previous_end = 0
+            # Flowsynth supports encoding arbitrary bytes with the "\xHH" notation where "HH" is
+            # the hexidecimal representation of the byte. That is what is handled here, while
+            # maintaining the rest of the content data as UTF-8.
             for hex_replacement in re.finditer(r"\\x[a-fA-F0-9]{2}", content_text):
                 # try/catch blocks to deal with different data representation from shlex (depends on Python version)
                 start = hex_replacement.start(0)
