@@ -30,6 +30,7 @@ import sys
 import socket
 import time
 import json
+from io import open
 
 #include scapy; suppress all errors
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
@@ -38,7 +39,7 @@ logging.getLogger("scapy.loading").setLevel(logging.ERROR)
 from scapy.all import Ether, IP, IPv6, TCP, UDP, RandMAC, hexdump, wrpcap, Raw
 
 #global variables
-APP_VERSION_STRING = "1.3.1"
+APP_VERSION_STRING = "1.4.0"
 LOGGING_LEVEL = logging.INFO
 ARGS = None
 
@@ -237,7 +238,6 @@ class FSLexer:
 
             while tokens[0] != ";":
                 token = tokens[0]
-                #print "token is %s" % token
                 if (token == ")"):
                     #end of attribute spec. jump forward two (should always be ');')
                     tokens = tokens[1:]
@@ -310,7 +310,6 @@ class FSLexer:
 
             while tokens[0] != ";":
                 token = tokens[0]
-                #print "token is %s" % token
                 if (token == ")"):
                     #end of attribute spec. jump forward two (should always be ');')
                     tokens = tokens[1:]
@@ -345,7 +344,7 @@ class FSLexer:
 
                 if (modifier_key.lower() == 'content'):
                     #content
-                    eventdecl['contents'].append({'type': 'string', 'value': modifier_value})
+                    eventdecl['contents'].append({'type': 'bytes', 'value': modifier_value})
                 elif (modifier_key.lower() == 'filecontent'):
                     #filecontent
                     if ARGS.no_filecontent:
@@ -466,25 +465,53 @@ class Flow:
     #This function expects all inputs to be enclosed within double quotes
     def parse_content(self, content):
         """ parse and render a content keyword """
+
+        # this regex is somewhat gnarly but leaving for now ... (why not
+        # just strip off double quotes on ends)?
         pcre_text = r'"([^\\"]*(?:\\.[^\\"]*)*)"'
 
+        result = bytearray()
 
         #first, check for text
         mo_text = re.match(pcre_text, content)
         if (mo_text != None):
-            logging.debug("Content: %s", mo_text.group(1))
-
             content_text = mo_text.group(1)
-            replacements = re.findall(r"\\x[a-fA-F0-9]{2}", content_text)
-            for replacement in replacements:
-                content_text = content_text.replace(replacement, chr(int(replacement[2:], 16)))
+            logging.debug("Content: %s (length %d)" % (content_text, len(content_text)))
+            start = 0
+            previous_end = 0
+            for hex_replacement in re.finditer(r"\\x[a-fA-F0-9]{2}", content_text):
+                # try/catch blocks to deal with different data representation from shlex (depends on Python version)
+                start = hex_replacement.start(0)
+                end = hex_replacement.end(0)
+                ascii_hex = content_text[start+2:start+4]
+                previous_substring = content_text[previous_end:start]
+                if len(previous_substring) > 0:
+                    # extend result with previous substring; encode as UTF-8
+                    try:
+                        result.extend(previous_substring.encode('utf-8'))
+                    except UnicodeDecodeError:
+                        result.extend(previous_substring)
+                # append ASCII hex byte to result
+                result.extend(bytearray.fromhex(ascii_hex))
+                previous_end = end
+            if previous_end == 0:
+                # no hex encoding found, just encode the whole thing
+                try:
+                    result.extend(content_text.encode('utf-8'))
+                except UnicodeDecodeError:
+                    result.extend(content_text)
+            elif previous_end < len(content_text):
+                # add the last substring
+                try:
+                    result.extend(content_text[previous_end:len(content_text)].encode('utf-8'))
+                except UnicodeDecodeError:
+                    result.extend(content_text[previous_end:len(content_text)])
 
-            return content_text
-        return ""
+        return result
 
     def render_payload(self, event):
         """ render all content matches into one payload value """
-        str_payload = ""
+        byte_payload = bytearray()
         for modifier in event['attributes']:
             #logging.debug("Found modifier: %s", modifier)
             keyword = modifier
@@ -494,27 +521,26 @@ class Flow:
             for contentobj in event['contents']:
                 content_value = contentobj['value']
                 content_type = contentobj['type']
-                if (content_type == 'string'):
-                    str_payload = "%s%s" % (str_payload, self.parse_content(content_value))
+                if (content_type == 'bytes'):
+                    byte_payload.extend(self.parse_content(content_value))
                 elif (content_type == 'file'):
                     if ARGS.no_filecontent:
                         # '--no-filecontent' option was passed to flowsynth
                         # This is also checked previously in the code path but adding here too
                         compiler_bailout("The 'filecontent' attribute is not supported in this context.")
                     else:
-                        str_payload = "%s%s" % (str_payload, self.get_file_content(content_value))
-
-        return str_payload
+                        byte_payload.extend(self.get_file_content(content_value))
+        return byte_payload
 
     def get_file_content(self, filepath):
         #we need to strip quotes from the filepath
         filepath = filepath.strip()[1:-1]
-
         try:
-            fptr = open(filepath,'r')
+            fdata = bytearray()
+            fptr = open(filepath,'rb')
             fdata = fptr.read()
             fptr.close()
-            return fdata.replace('"','\"')
+            return fdata
         except IOError:
             raise SynCompileError("File not found -- %s" % filepath)
             sys.exit(-1)
@@ -541,7 +567,7 @@ class Flow:
 
         #get the payload
         hasPayload = False
-        payload = ""
+        payload = bytearray()
         total_payload = self.render_payload(event)
         if len(total_payload) > 0:
             hasPayload = True
@@ -559,7 +585,7 @@ class Flow:
                     total_payload = total_payload[self.tcp_mss:]
                 else:
                     payload = total_payload
-                    total_payload = ""
+                    total_payload = bytearray()
 
             #figure out what the src/dst port and host are
 
@@ -603,8 +629,6 @@ class Flow:
                 if (len(payload) > 0):
                     tcp_ack = self.to_server_seq
 
-
-
             pkt = None
             logging.debug("SRC host: %s", src_host)
             logging.debug("DST host: %s", dst_host)
@@ -613,15 +637,10 @@ class Flow:
             else:
                 lyr_ip = IPv6(src = src_host, dst = dst_host)
             lyr_eth = Ether(src = src_mac, dst = dst_mac)
-            # the 'payload' variable is type str [sic] so here we put the payload into a bytearray
-            # and pass it to scapy using Raw(). If we don't do this, we can end up with situations
-            # where bytes (e.g. entered with hex encoding) can get interpreted as multi-byte UTF8
-            # when passed to scapy which is not the desired behavior.
-            payload_bytes = bytearray()
-            payload_bytes.extend(map(ord,payload))
             if (self.l4_proto == Flow.PROTO_UDP):
                 #generate udp packet
-                lyr_udp = UDP(sport = src_port, dport = dst_port) / Raw(payload_bytes)
+                # the 'payload' variable is a bytearray so make sure we pass it to scapy with Raw().
+                lyr_udp = UDP(sport = src_port, dport = dst_port) / Raw(payload)
                 pkt = lyr_eth / lyr_ip / lyr_udp
                 pkts.append(pkt)
 
@@ -658,7 +677,8 @@ class Flow:
                     flags = 'PA'
 
                 logging.debug('Data packet with inferred flags S:%s A:%s', tcp_seq, tcp_ack)
-                lyr_tcp = TCP(flags=flags, seq=tcp_seq, ack=tcp_ack, sport = src_port, dport = dst_port) / Raw(payload_bytes)
+                # the 'payload' variable is a bytearray so make sure we pass it to scapy with Raw().
+                lyr_tcp = TCP(flags=flags, seq=tcp_seq, ack=tcp_ack, sport = src_port, dport = dst_port) / Raw(payload)
                 pkt = lyr_eth / lyr_ip / lyr_tcp
                 pkts.append(pkt)
 
@@ -1026,15 +1046,21 @@ def add_event(flowname, eventdecl):
 
 #has test case
 def load_syn_file(filename):
-    """ loads a flowsynth file from disk and returns as a string"""
+    """ loads a flowsynth file from disk and returns as UTF-8 """
     try:
         filedata = ""
-        fptr = open(filename,'r')
+        # support UTF-8 and ASCII of course -- could be seen in "content" data
+        fptr = open(filename, 'r', encoding='utf-8')
         filedata = fptr.read()
         fptr.close()
+        # Python2 will store this as unicode type; Python3 as (UTF-8) str.
+        # Encode here for Python2 so shlex doesn't barf on it downstream.
+        if not isinstance(filedata, str):
+            filedata = filedata.encode('utf-8')
     except IOError:
         compiler_bailout("Cannot open file ('%s')" % filename)
-
+    except UnicodeDecodeError:
+        compiler_bailout("Unable to decode file as UTF-8 ('%s')" % filename)
     return filedata
 
 #helper function to report runtime errors

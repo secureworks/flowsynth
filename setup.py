@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="flowsynth",
-    version="1.3.2",
+    version="1.4.0",
     author="Will Urbanski",
     maintainer="David Wharton",
     maintainer_email="counterthreatunit@users.noreply.github.com",
