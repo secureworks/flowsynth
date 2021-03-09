@@ -38,7 +38,7 @@ logging.getLogger("scapy.loading").setLevel(logging.ERROR)
 from scapy.all import Ether, IP, IPv6, TCP, UDP, RandMAC, hexdump, wrpcap, Raw
 
 #global variables
-APP_VERSION_STRING = "1.4.0"
+APP_VERSION_STRING = "1.4.1"
 # Define the standard version indicator.
 __version__ = APP_VERSION_STRING
 LOGGING_LEVEL = logging.INFO
