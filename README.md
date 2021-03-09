@@ -47,6 +47,10 @@ The Model class function `build()` executes flowsynth and the class constructor 
 
 *Note:* Because of the current less-than-ideal use of global variables instead of class variables, if more than one Model object is used concurrently, there will be issues. Hopefully this limitation will be remedied in a future release.
 
+If the module is installed, Flowsynth can be invoked from the command line and run like a script, e.g.:
+
+    python3 -m flowsynth -f pcap -w out.pcap my.synth
+
 ## How it works ##
 
 Flowsynth uses a syntax language to describe network flows. The syntax language is made up of individual *instructions* that are parsed by the application and are grouped into *events*, which are a logical representation of the *instructions* in the network domain. After all *instructions* have been parsed, the *events* are iterated over and converted into *packets*, which are the real-world representation of the traffic on the wire.

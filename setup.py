@@ -5,10 +5,10 @@ with open("README.md", "r") as fh:
 
 setup(
     name="flowsynth",
-    version="1.4.0",
+    version="1.4.1",
     author="Will Urbanski",
     maintainer="David Wharton",
-    maintainer_email="counterthreatunit@users.noreply.github.com",
+    maintainer_email="whartond@users.noreply.github.com",
     description="Flowsynth is a tool for rapidly modeling network traffic. Flowsynth can be used to generate text-based hexdumps of packets as well as native libpcap format packet captures.",
     long_description=long_description,
     long_description_content_type="text/markdown",
