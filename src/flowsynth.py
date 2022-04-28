@@ -443,10 +443,8 @@ class Flow:
                 parser_bailout("A dst_mac ({}) was explicitly set, but it doesn't appear to be valid.".format(dmac))
 
 
-        # self.to_server_seq = random.randint(10000, 99999)
-        # self.to_client_seq = random.randint(10000, 99999)
-        self.to_server_seq = 100
-        self.to_client_seq = 200
+        self.to_server_seq = random.randint(10000, 99999)
+        self.to_client_seq = random.randint(10000, 99999)
         self.to_server_ack = 0
         self.to_client_ack = 0
         self.tcp_server_bytes = 0
@@ -571,25 +569,25 @@ class Flow:
         if self.l4_proto == Flow.PROTO_TCP:
             src_port = int(self.src_port)
             dst_port = int(self.dst_port)
-
+            #FNI ACK to server
             lyr_eth = Ether(src = self.src_mac, dst = self.dst_mac)
             lyr_ip = IP(src = self.src_host, dst = self.dst_host)
             lyr_tcp = TCP(flags='FA', seq=self.to_server_seq, ack=self.to_client_seq, sport = src_port, dport = dst_port) / Raw(payload)
             pkt = lyr_eth / lyr_ip / lyr_tcp
             pkts.append(pkt)
-
+            #FNI ACK to client
             lyr_eth = Ether(src = self.dst_mac, dst = self.src_mac)
             lyr_ip = IP(src = self.dst_host, dst = self.src_host)
             lyr_tcp = TCP(flags='FA', seq=self.to_client_seq, ack=self.to_server_seq, sport = dst_port, dport = src_port) / Raw(payload)
             pkt = lyr_eth / lyr_ip / lyr_tcp
             pkts.append(pkt)
-
+            #ACK
             lyr_eth = Ether(src = self.dst_mac, dst = self.src_mac)
             lyr_ip = IP(src = self.dst_host, dst = self.src_host)
             lyr_tcp = TCP(flags='A', seq=self.to_client_seq + 1, ack=self.to_server_seq + 1, sport = dst_port, dport = src_port) / Raw(payload)
             pkt = lyr_eth / lyr_ip / lyr_tcp
             pkts.append(pkt)
-
+            #ACK
             lyr_eth = Ether(src = self.src_mac, dst = self.dst_mac)
             lyr_ip = IP(src = self.src_host, dst = self.dst_host)
             lyr_tcp = TCP(flags='A', seq=self.to_server_seq + 1, ack=self.to_client_seq + 1, sport = src_port, dport = dst_port) / Raw(payload)
