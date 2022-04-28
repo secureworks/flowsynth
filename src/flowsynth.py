@@ -562,13 +562,50 @@ class Flow:
                 return port
             except ValueError:
                 raise SynSyntaxError("Invalid Syntax. %s is not a valid port" % port)
+    def render_fni(self,eventid):
+        event = self.timeline[eventid]
+        pkts = []
+        payload = bytearray()
+        if self.l4_proto == Flow.PROTO_TCP:
+            src_port = int(self.src_port)
+            dst_port = int(self.dst_port)
+            #FNI ACK to server
+            lyr_eth = Ether(src = self.src_mac, dst = self.dst_mac)
+            lyr_ip = IP(src = self.src_host, dst = self.dst_host)
+            lyr_tcp = TCP(flags='FA', seq=self.to_server_seq, ack=self.to_client_seq, sport = src_port, dport = dst_port) / Raw(payload)
+            pkt = lyr_eth / lyr_ip / lyr_tcp
+            pkts.append(pkt)
+            #FNI ACK to client
+            lyr_eth = Ether(src = self.dst_mac, dst = self.src_mac)
+            lyr_ip = IP(src = self.dst_host, dst = self.src_host)
+            lyr_tcp = TCP(flags='FA', seq=self.to_client_seq, ack=self.to_server_seq, sport = dst_port, dport = src_port) / Raw(payload)
+            pkt = lyr_eth / lyr_ip / lyr_tcp
+            pkts.append(pkt)
+            #ACK
+            lyr_eth = Ether(src = self.dst_mac, dst = self.src_mac)
+            lyr_ip = IP(src = self.dst_host, dst = self.src_host)
+            lyr_tcp = TCP(flags='A', seq=self.to_client_seq + 1, ack=self.to_server_seq + 1, sport = dst_port, dport = src_port) / Raw(payload)
+            pkt = lyr_eth / lyr_ip / lyr_tcp
+            pkts.append(pkt)
+            #ACK
+            lyr_eth = Ether(src = self.src_mac, dst = self.dst_mac)
+            lyr_ip = IP(src = self.src_host, dst = self.dst_host)
+            lyr_tcp = TCP(flags='A', seq=self.to_server_seq + 1, ack=self.to_client_seq + 1, sport = src_port, dport = dst_port) / Raw(payload)
+            pkt = lyr_eth / lyr_ip / lyr_tcp
+            pkts.append(pkt)
+        elif self.l4_proto == Flow.PROTO_UDP:
+                pass
+        return pkts
 
     def render(self, eventid):
         """ render a specific eventid """
 
         event = self.timeline[eventid]
         pkts = []
-
+        ##finish flow
+        if event.get('attributes', False).get('close',False) is True:
+            pkts = self.render_fni(eventid)
+            return pkts
         #get the payload
         hasPayload = False
         payload = bytearray()
@@ -971,8 +1008,8 @@ def autogen_handshake(flowdecl):
 
     parent_flow = COMPILER_FLOWS[flowdecl['name']]
 
-    client_isn = 10    #random.randint(10000, 99999)
-    server_isn = 100   #random.randint(10000, 99999)
+    client_isn = 10000    #random.randint(10000, 99999)
+    server_isn = 1000000   #random.randint(10000, 99999)
 
     #send syn
     eventdecl = {}

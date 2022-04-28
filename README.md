@@ -158,6 +158,7 @@ Data can be transferred between hosts using two methods. The example below outli
 
     my_connection > (content:"GET / HTTP/1.1\x0d\x0aHost:google.com\x0d\x0aUser-Agent: DogBot\x0d\x0a\x0d\x0a";);
     my_connection < (content:"HTTP/1.1 200 OK\x0d\x0aContent-Length: 300\x0d\x0a\x0d\x0aWelcome to Google.com!";);
+    my_connection > ( close; );
 
 In this example, the flow *my_connection* must have been previously declared. A single packet with the content specified will be transmitted from the client to the server. The following method is also accepted, however, this may change in the future as the syntax is formalized.:
 
@@ -181,7 +182,7 @@ The following event attributes are currently supported:
 +   tcp.flags.syn
 +   tcp.flags.ack
 +   tcp.flags.rst
-
++   close
 ##### Content Attribute #####
 The *content* attribute is used to specify the payload of a packet. Content attributes must be enclosed in double quotes. UTF-8 is supported and arbitrary bytes can be expressed with the "\xHH" notation where "HH" is the hexidecimal representation of the byte. For example, a carriage return (ASCII 0x0D) followed by a line feed (ASCII 0x0A) can be defined like this: *\x0D\x0A*.  This translation takes place during the render phase.
 
@@ -213,6 +214,9 @@ The *tcp.flags.ack* attribute tells Flowsynth to force the packet to be an ACK p
 
 ##### tcp.flags.rst Attribute #####
 The *tcp.flags.rst* attribute tells Flowsynth to force the packet to be a RST packet.
+
+#### close Attribute ####
+The close attribute tells Flowsynth to close a tcp connection with Four-Way Wavehand
 
 ## Authors ###
 
