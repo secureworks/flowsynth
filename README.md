@@ -167,13 +167,13 @@ usage:
 `(tcp.initialize; tcp.client_isn: 10; tcp.server_isn: 100; );`
 
 ##### src_mac #####
-The *src_mac* attribute explicitly sets the MAC address for packets from the flow source. A MAC set this way also becomes the source host's default for flows declared after this one. If no MAC is supplied, the host's default is used: a MAC set explicitly for that host by an earlier flow, otherwise a random unicast, locally administered MAC chosen once for the host and reused across all flows in the synfile.
+The *src_mac* attribute explicitly sets the MAC address for packets from the flow source. If no MAC is supplied, the source host's MAC from another flow that sets one explicitly is used (the first, if several do), wherever that flow is in the synfile. Otherwise a random unicast, locally administered MAC is chosen once for the host and reused across all flows.
 
 usage:
 `(tcp.initialize; src_mac: 36:16:3a:4e:6a:12; );`
 
 ##### dst_mac #####
-The *dst_mac* attribute explicitly sets the MAC address for packets from the flow destination. A MAC set this way also becomes the destination host's default for flows declared after this one. If no MAC is supplied, the host's default is used: a MAC set explicitly for that host by an earlier flow, otherwise a random unicast, locally administered MAC chosen once for the host and reused across all flows in the synfile.
+The *dst_mac* attribute explicitly sets the MAC address for packets from the flow destination. If no MAC is supplied, the destination host's MAC from another flow that sets one explicitly is used (the first, if several do), wherever that flow is in the synfile. Otherwise a random unicast, locally administered MAC is chosen once for the host and reused across all flows.
 
 usage:
 `(tcp.initialize; dst_mac: 36:16:3a:4e:6a:13; );`
@@ -232,7 +232,7 @@ The *tcp.seq* attribute lets you set the sequence number for the event's packet.
 What happens next depends on where the value falls:
 
 - On a side's first packet or a SYN, the side's stream starts there.
-- When the packet ends past what that side has sent so far, later packets from that side follow on from it.
+- When the packet carries data (or a SYN or FIN) and ends past what that side has sent so far, later packets from that side follow on from it.
 - When the packet falls within data already sent (a retransmission or an overlapping segment), later packets continue from the end of the stream.
 
 The other side acknowledges data the way a real receiver does: up to the first byte it hasn't received. A packet that leaves a hole gets a duplicate ACK for the start of the hole, and once the hole is filled, the ACK covers everything received.
@@ -250,7 +250,7 @@ Example:
 - "jk" at 1009 leaves a hole at 1005-1008, so the server acknowledges 1005 again.
 - "fghi" fills the hole, and the server acknowledges 1011. A packet without *tcp.seq* would go next at 1011.
 
-A flow's initial sequence numbers are random unless *tcp.client_isn* and *tcp.server_isn* set them. An absolute *tcp.seq* value only means something relative to a known sequence, so set those attributes, set *tcp.seq* on each side's first packet, or write the handshake yourself.
+A flow's initial sequence numbers are random unless *tcp.client_isn* and *tcp.server_isn* set them. An absolute *tcp.seq* or *tcp.ack* value only means something against a known sequence, so set both attributes on flows that use them. (A *tcp.seq* on a side's very first packet also sets its sequence, but the automatic ACK of the other side's data counts as a packet.) Flowsynth logs a warning when a value is compared with a random sequence number.
 
 ##### tcp.ack Attribute #####
 The *tcp.ack* attribute lets you set the acknowledgement number for the event's packet. It only affects that packet; the flow's sequence tracking is unchanged.

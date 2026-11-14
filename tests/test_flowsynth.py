@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import datetime
@@ -97,7 +98,7 @@ class TestMacs(FlowsynthTestCase):
                     macs.add(mac)
         self.assertEqual(macs, {'00:11:22:33:44:55'})
 
-    def test_explicit_mac_replaces_earlier_default(self):
+    def test_explicit_mac_is_the_hosts_mac_in_every_flow(self):
         synth = ('flow a udp 10.0.0.1:1 > 10.0.0.2:2;\n'
                  'a > (content:"x";);\n'
                  'flow b udp 10.0.0.1:3 > 10.0.0.3:4 (src_mac: 00:11:22:33:44:55;);\n'
@@ -105,8 +106,8 @@ class TestMacs(FlowsynthTestCase):
                  'flow c udp 10.0.0.3:5 > 10.0.0.1:6;\n'
                  'c > (content:"z";);\n')
         pkts = rdpcap(self.build(synth))
-        self.assertEqual([p[Ether].src for p in pkts[1:2]], ['00:11:22:33:44:55'])
-        self.assertEqual(pkts[2][Ether].dst, '00:11:22:33:44:55')
+        # flow a comes before the flow that sets the MAC, and still uses it
+        self.assertEqual([pkts[0][Ether].src, pkts[1][Ether].src, pkts[2][Ether].dst], ['00:11:22:33:44:55'] * 3)
 
     def test_ipv6_host_written_two_ways(self):
         synth = ('flow a udp [2001:db8::1]:1 > [2001:db8::2]:2;\n'
@@ -274,6 +275,50 @@ class TestTcpSequence(FlowsynthTestCase):
         banner, banner_ack, ehlo, ehlo_ack, nxt, _ = self.tcp_packets(self.build(synth))
         self.assertEqual(banner_ack.seq, 1000)
         self.assertEqual((ehlo.seq, ehlo_ack.ack, nxt.seq), (900, 1000, 1000))
+
+    def test_hole_filled_across_the_wrap(self):
+        synth = ('flow f tcp 10.0.0.1:1234 > 10.0.0.2:80 (tcp.client_isn: 4294967290; tcp.server_isn: 1;);\n'
+                 'f > (content:"abcd";);\n'
+                 'f > (content:"ij"; tcp.seq: 2;);\n'
+                 'f > (content:"efgh"; tcp.seq: 4294967294;);\n')
+        tcp_pkts = self.tcp_packets(self.build(synth))
+        self.assertEqual([p.seq for p in tcp_pkts[0::2]], [4294967290, 2, 4294967294])
+        self.assertEqual([p.ack for p in tcp_pkts[1::2]], [4294967294, 4294967294, 4])
+
+    def test_bare_packet_ahead_does_not_move_the_stream(self):
+        synth = self.flow() + ('f > (content:"abc";);\n'
+                               'f > (tcp.flags.ack; tcp.seq: 2000;);\n'
+                               'f > (content:"de";);\n')
+        tcp_pkts = self.tcp_packets(self.build(synth))[3:]
+        self.assertEqual([p.seq for p in tcp_pkts], [1000, 5000, 2000, 1003, 5000])
+        self.assertEqual(tcp_pkts[-1].ack, 1005)
+
+    def test_warns_about_server_seq_after_automatic_ack(self):
+        # the server's automatic ACK is its first packet, so its tcp.seq is compared
+        # with a random sequence number
+        synth = ('flow f tcp 10.0.0.1:1 > 10.0.0.2:2;\n'
+                 'f > (content:"GET"; tcp.seq: 1000;);\n'
+                 'f < (content:"200"; tcp.seq: 5000;);\n')
+        with self.assertLogs(level='WARNING') as logs:
+            self.build(synth)
+        self.assertIn('tcp.server_isn', logs.output[0])
+
+    def test_no_warning_with_isn_attributes(self):
+        synth = ('flow f tcp 10.0.0.1:1 > 10.0.0.2:2 (tcp.client_isn: 1000; tcp.server_isn: 5000;);\n'
+                 'f > (content:"GET"; tcp.seq: 1000; tcp.ack: 5000;);\n'
+                 'f < (content:"200"; tcp.seq: 5000;);\n'
+                 'f < (content:"more";);\n')
+        with self.assertNoLogs(level='WARNING'):
+            tcp_pkts = self.tcp_packets(self.build(synth))
+        self.assertEqual([p.seq for p in tcp_pkts[2::2]], [5000, 5003])
+        self.assertEqual(tcp_pkts[-1].ack, 5007)
+
+    def test_invalid_mss(self):
+        for bad in ('0', '-1', 'abc', '65536'):
+            flowdecl = {'name': 'f', 'l3_proto': flowsynth.Flow.PROTO_IPV4, 'l4_proto': flowsynth.Flow.PROTO_TCP,
+                        'src_host': '10.0.0.1', 'src_port': '1', 'dst_host': '10.0.0.2', 'dst_port': '2',
+                        'flow': '>', 'attributes': {'mss': bad}}
+            self.assertRaises(flowsynth.SynSyntaxError, flowsynth.Flow, flowdecl)
 
     def test_fin_split_over_mss(self):
         synth = self.flow(mss=4) + 'f > (content:"abcdefghij"; tcp.flags.fin;);\n'
@@ -526,6 +571,15 @@ class TestStartTime(FlowsynthTestCase):
         self.assertIn(b'Invalid start time', err)
 
 
+    def test_start_time_microseconds(self):
+        # a start a hair under a whole second must not write usec=1000000
+        path = self.build(seed=1, start_time=1700000000.9999996)
+        with open(path, 'rb') as fptr:
+            data = fptr.read()
+        sec, usec = struct.unpack('<II', data[24:32])
+        self.assertEqual((sec, usec), (1700000001, 0))
+        self.assertAlmostEqual(self.first_times(path)[1], 1700000001.001)
+
     def test_start_time_too_late_for_packets(self):
         self.assertRaises(flowsynth.SynTerminalError, self.build, seed=1, start_time=2**32 - 0.0005)
 
@@ -551,6 +605,13 @@ class TestCli(FlowsynthTestCase):
         self.assertEqual(status['compiler']['packets'], 10)
         for key in ('app_version', 'input-file', 'output-file'):
             self.assertIn(key, status)
+
+    def test_invalid_mac_json_error(self):
+        rc, out = self.run_cli('flow f udp 1.1.1.1:1 > 2.2.2.2:2 (src_mac: 00:11;);\nf > (content:"x";);\n',
+                               '--display', 'json')
+        self.assertNotEqual(rc, 0)
+        status = json.loads(out.decode())
+        self.assertIn('src_mac', status['error'])
 
     def test_syntax_error_exits_nonzero(self):
         bad = 'flow f tcp 1.1.1.1:foo > 2.2.2.2:2;\nf > (content:"x";);\n'

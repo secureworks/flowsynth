@@ -23,7 +23,10 @@ from __future__ import print_function
 import argparse
 import calendar
 import datetime
-import ipaddress
+try:
+    import ipaddress
+except ImportError:     # Python 2 without the backport: compare host strings as written
+    ipaddress = None
 import logging
 import re
 import random
@@ -33,6 +36,7 @@ import socket
 import time
 import json
 from io import open
+from decimal import Decimal
 
 #include scapy; suppress all errors
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
@@ -62,6 +66,7 @@ BUILD_STATUS = {}
 #randomness (MACs, ISNs, 'any' ports). seeded per build; see run()
 RNG = random.Random()
 HOST_MACS = {}                  # one default MAC per host, shared across flows
+VALID_MAC_RE = re.compile(r'[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}$')
 
 #packet timestamps used when a seed or start time is given, so output is byte-for-byte reproducible
 SEEDED_START_TIME = 946684800   # 2000-01-01 00:00:00 UTC; the default start time with a seed
@@ -77,7 +82,8 @@ def parse_start_time(value):
     if value is None:
         return None
     start = _parse_start_time(value)
-    if not (0 <= start < PCAP_MAX_TIME):
+    #pcap timestamps hold whole microseconds
+    if not (0 <= round(start, 6) < PCAP_MAX_TIME):
         raise ValueError("Invalid start time '%s'; it must fall between 1970 and 2106" % value)
     return start
 
@@ -129,6 +135,8 @@ def seq_after(a, b):
 def host_key(host):
     """a host's address in canonical form, so one IPv6 address written two ways
     is still one host"""
+    if ipaddress is None:
+        return host
     try:
         return ipaddress.ip_address(u'%s' % host).compressed
     except ValueError:
@@ -513,8 +521,6 @@ class Flow:
             smac = flowdecl['attributes']['src_mac'].lower()
             if self._valid_mac(smac):
                 self.src_mac = smac
-                #later flows involving this host default to the same MAC
-                HOST_MACS[host_key(self.src_host)] = smac
             else:
                 parser_bailout("A src_mac ({}) was explicitly set, but it doesn't appear to be valid.".format(smac))
 
@@ -525,7 +531,6 @@ class Flow:
             dmac = flowdecl['attributes']['dst_mac'].lower()
             if self._valid_mac(dmac):
                 self.dst_mac = dmac
-                HOST_MACS[host_key(self.dst_host)] = dmac
             else:
                 parser_bailout("A dst_mac ({}) was explicitly set, but it doesn't appear to be valid.".format(dmac))
 
@@ -538,9 +543,12 @@ class Flow:
         for attr, side in (('tcp.client_isn', 'to_server_seq'), ('tcp.server_isn', 'to_client_seq')):
             if attr in flowdecl['attributes']:
                 setattr(self, side, Flow._isn(attr, flowdecl['attributes'][attr]))
-        #absolute tcp.seq/tcp.ack values can't be related to a random handshake; warn once
-        self.warn_absolute_seq = ('tcp.initialize' in flowdecl['attributes'] and not
-                                  ('tcp.client_isn' in flowdecl['attributes'] and 'tcp.server_isn' in flowdecl['attributes']))
+        #whether each side's sequence numbers are known to the synfile's author: set by an
+        #ISN attribute, or started by a manual tcp.seq. absolute tcp.seq/tcp.ack values
+        #against a random sequence can't mean what was intended; warn once per flow
+        self.to_server_anchored = 'tcp.client_isn' in flowdecl['attributes']
+        self.to_client_anchored = 'tcp.server_isn' in flowdecl['attributes']
+        self.warned_absolute_seq = False
         #whether each side has sent a TCP packet yet
         self.to_server_sent = False
         self.to_client_sent = False
@@ -553,10 +561,26 @@ class Flow:
         self.tcp_server_bytes = 0
         self.tcp_client_bytes = 0
 
-        try:
-            self.tcp_mss = int(flowdecl['attributes']['mss'])
-        except KeyError:
-            self.tcp_mss = 1460
+        self.tcp_mss = 1460
+        if 'mss' in flowdecl['attributes']:
+            try:
+                self.tcp_mss = int(flowdecl['attributes']['mss'])
+            except (TypeError, ValueError):
+                self.tcp_mss = 0
+            if not 0 < self.tcp_mss < 65536:
+                parser_bailout("mss (%s) must be an integer from 1 to 65535." % flowdecl['attributes']['mss'])
+
+    def _check_anchored(self, side, peer, event, manual_seq, restart):
+        """note a stream started by a manual seq; warn about absolute values against a
+        random initial sequence number"""
+        if manual_seq and restart:
+            setattr(self, side + '_anchored', True)
+        unanchored = ((manual_seq and not getattr(self, side + '_anchored')) or
+                      ('tcp.ack' in event['attributes'] and not getattr(self, peer + '_anchored')))
+        if unanchored and not self.warned_absolute_seq:
+            logging.warning("Flow %s sets tcp.seq/tcp.ack against a random initial sequence number; "
+                            "set tcp.client_isn and tcp.server_isn (10 and 100 match Flowsynth 1.4)", self.name)
+            self.warned_absolute_seq = True
 
     def _receive(self, side, start, end, restart):
         """record that a segment [start, end) of one side's stream ('to_server' or
@@ -597,11 +621,7 @@ class Flow:
         return isn
 
     def _valid_mac(self, mac):
-        mac_re = r'[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}$'
-        valid_mac = re.match(mac_re, mac)
-        if valid_mac != None:
-            return True
-        return False
+        return VALID_MAC_RE.match(mac) is not None
 
     #has test case
     #This function expects all inputs to be enclosed within double quotes
@@ -850,14 +870,19 @@ class Flow:
                 #stream up to the first hole. a manual tcp.ack only affects the event's own packet
                 if (event['flow'] == Flow.FLOW_TO_CLIENT):
                     restart = not self.to_client_sent or 'S' in flags
-                    if not manual_seq or restart or seq_after(seq_end, self.to_client_seq):
+                    if firstSegment:
+                        self._check_anchored('to_client', 'to_server', event, manual_seq, restart)
+                    #a manual seq ahead of the stream moves it on; one without data (or SYN/FIN) doesn't
+                    if not manual_seq or restart or (seq_len > 0 and seq_after(seq_end, self.to_client_seq)):
                         self.to_client_seq = seq_end
                     self.to_client_sent = True
                     tcp_seq = self.to_server_seq
                     tcp_ack = self._receive('to_client', pkt_seq, seq_end, restart)
                 else:
                     restart = not self.to_server_sent or 'S' in flags
-                    if not manual_seq or restart or seq_after(seq_end, self.to_server_seq):
+                    if firstSegment:
+                        self._check_anchored('to_server', 'to_client', event, manual_seq, restart)
+                    if not manual_seq or restart or (seq_len > 0 and seq_after(seq_end, self.to_server_seq)):
                         self.to_server_seq = seq_end
                     self.to_server_sent = True
                     tcp_seq = self.to_client_seq
@@ -1094,13 +1119,16 @@ def render_timeline():
         #have the flow render the pkt, and add it to our global output queue
         pkts = flow.render(eventid)
         for pkt in pkts:
-            if getattr(ARGS, 'start_time', None) is not None:
-                #fixed timestamps instead of the wall clock, for reproducible output
-                pkt.time = ARGS.start_time + len(COMPILER_OUTPUT) * SEEDED_TIME_STEP
-                if pkt.time >= PCAP_MAX_TIME:
+            start = getattr(ARGS, 'start_time', None)
+            if start is None and getattr(ARGS, 'seed', None) is not None:
+                start = SEEDED_START_TIME
+            if start is not None:
+                #fixed timestamps instead of the wall clock, for reproducible output; counted
+                #in whole microseconds so float rounding can't produce an invalid pcap time
+                usec = int(round(start * 1000000)) + len(COMPILER_OUTPUT) * int(round(SEEDED_TIME_STEP * 1000000))
+                if usec >= PCAP_MAX_TIME * 1000000:
                     compiler_bailout("The start time is too late: packet %d would be after 2106." % (len(COMPILER_OUTPUT) + 1))
-            elif getattr(ARGS, 'seed', None) is not None:
-                pkt.time = SEEDED_START_TIME + len(COMPILER_OUTPUT) * SEEDED_TIME_STEP
+                pkt.time = Decimal(usec) / Decimal(1000000)
             COMPILER_OUTPUT.append(pkt)
 
 def process_instructions(instr):
@@ -1114,6 +1142,15 @@ def process_instructions(instr):
         #print lexer.instructions
 
         COMPILER_INSTRUCTIONS = lexer.instructions
+
+        #a MAC set explicitly for a host is that host's MAC in every flow that doesn't set
+        #one, whichever order the flows come in (the first one set, if there are several)
+        for instr in lexer.instructions:
+            if instr['type'] == 'flow':
+                for host, attr in (('src_host', 'src_mac'), ('dst_host', 'dst_mac')):
+                    mac = instr['attributes'].get(attr)
+                    if mac and host in instr and VALID_MAC_RE.match(mac.lower()):
+                        HOST_MACS.setdefault(host_key(instr[host]), mac.lower())
 
         for instr in lexer.instructions:
             name = instr['name']
@@ -1185,11 +1222,6 @@ def add_event(flowname, eventdecl):
     except KeyError:
         compiler_bailout("Flow [%s] has not been instantiated." % flowname)
     flow.timeline.append(eventdecl)
-
-    if flow.warn_absolute_seq and ('tcp.seq' in eventdecl['attributes'] or 'tcp.ack' in eventdecl['attributes']):
-        logging.warning("Flow %s sets tcp.seq/tcp.ack, but tcp.initialize uses random initial sequence "
-                        "numbers; set tcp.client_isn and tcp.server_isn (10 and 100 match Flowsynth 1.4)", flowname)
-        flow.warn_absolute_seq = False
 
     #create an eventref for the global compiler timeline, and add it to that timeline.
     #it holds the flow object itself, so a later redeclaration of the name doesn't affect it
