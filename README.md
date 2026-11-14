@@ -137,6 +137,8 @@ If a DNS record is specified in the flow declaration (instead of an explicit IP 
 
 A port may be given as *any*, in which case a random port between 1024 and 65000 is chosen and used for the life of the flow.
 
+Declaring a flow with a name that is already in use starts a new flow under that name (Flowsynth logs a warning). Events after the new declaration belong to the new flow; events before it keep the earlier one.
+
 #### Flow Attributes #####
 The following flow attributes are currently supported:
 

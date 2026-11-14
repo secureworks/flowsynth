@@ -417,7 +417,6 @@ class Flow:
     dst_host = ""
     dst_port = 0
     initialized = False
-    timeline = []
 
     #tcp specific values
     to_server_seq = 0
@@ -443,6 +442,9 @@ class Flow:
             self.dst_port = Flow.format_port(flowdecl['dst_port'])
         except KeyError:
             parser_bailout("Invalid flowdecl passed to Flow.init")
+
+        #this flow's events, indexed by the eventrefs in COMPILER_TIMELINE
+        self.timeline = []
 
         #use a user-supplied source and destination mac if provided, else the host default
         if 'src_mac' not in flowdecl['attributes']:
@@ -849,9 +851,16 @@ class Model():
 
 def run(sFile):
     """ executes the compiler """
-    global BUILD_STATUS
+    global BUILD_STATUS, COMPILER_FLOWS, COMPILER_OUTPUT, COMPILER_TIMELINE, COMPILER_INSTRUCTIONS
+
+    #start every build from empty compiler state
+    COMPILER_FLOWS = {}
+    COMPILER_OUTPUT = []
+    COMPILER_TIMELINE = []
+    COMPILER_INSTRUCTIONS = []
 
     #initialize the build status
+    BUILD_STATUS.clear()
     BUILD_STATUS['app_version'] = APP_VERSION_STRING
     BUILD_STATUS['successful'] = False
     BUILD_STATUS['compiler'] = {}
@@ -950,11 +959,11 @@ def render_timeline():
     global COMPILER_FLOWS
 
     for eventref in COMPILER_TIMELINE:
-        flowname = eventref['flow']
+        flow = eventref['flow']
         eventid = eventref['event']
 
         #have the flow render the pkt, and add it to our global output queue
-        pkts = COMPILER_FLOWS[flowname].render(eventid)
+        pkts = flow.render(eventid)
         for pkt in pkts:
             if ARGS.seed is not None:
                 #fixed timestamps instead of the wall clock, for reproducible output
@@ -978,6 +987,7 @@ def process_instructions(instr):
             if instr['type'] == 'flow':
                 #check if flow exists already ?
                 if name in COMPILER_FLOWS:
+                    #events from here on use the new flow; earlier events keep the old one
                     logging.warning("Flow '%s' being redeclared!", name)
 
                 #add the flow to the timeline
@@ -1072,12 +1082,14 @@ def add_event(flowname, eventdecl):
 
     #save the eventdecl to the flows local timeline
     try:
-        COMPILER_FLOWS[flowname].timeline.append(eventdecl)
+        flow = COMPILER_FLOWS[flowname]
     except KeyError:
         compiler_bailout("Flow [%s] has not been instantiated." % flowname)
+    flow.timeline.append(eventdecl)
 
-    #create an eventref for the global compiler timeline, and add it to that timeline
-    eventref = {'flow': flowname, 'event': len(COMPILER_FLOWS[flowname].timeline)-1}
+    #create an eventref for the global compiler timeline, and add it to that timeline.
+    #it holds the flow object itself, so a later redeclaration of the name doesn't affect it
+    eventref = {'flow': flow, 'event': len(flow.timeline)-1}
     COMPILER_TIMELINE.append(eventref)
 
 #has test case

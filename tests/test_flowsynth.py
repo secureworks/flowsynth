@@ -204,5 +204,37 @@ class TestSeed(FlowsynthTestCase):
         self.assertEqual(outputs[0], outputs[1])
 
 
+class TestBuildState(FlowsynthTestCase):
+
+    def test_model_built_twice(self):
+        synth_path = os.path.join(self.tmpdir, 'twice.synth')
+        pcap_path = os.path.join(self.tmpdir, 'twice.pcap')
+        with open(synth_path, 'w') as fptr:
+            fptr.write(SYNTH)
+        model = flowsynth.Model(input=synth_path, output_format='pcap', output_file=pcap_path,
+                                quiet=True, seed=5)
+        model.build()
+        first = self.read_bytes(pcap_path)
+        model.build()
+        self.assertEqual(self.read_bytes(pcap_path), first)
+
+    def test_builds_are_independent(self):
+        first = self.read_bytes(self.build(seed=3, name='a'))
+        self.build('flow x udp 10.9.9.9:1 > 10.8.8.8:2;\nx > (content:"z";);\n', name='other')
+        self.assertEqual(self.read_bytes(self.build(seed=3, name='c')), first)
+        # each flow holds only its own events
+        self.assertEqual(len(flowsynth.COMPILER_FLOWS['web'].timeline), 6)
+        self.assertEqual(len(flowsynth.COMPILER_FLOWS['dns'].timeline), 2)
+
+    def test_redeclared_flow(self):
+        synth = ('flow f udp 10.0.0.1:1111 > 10.0.0.2:53;\n'
+                 'f > (content:"a";);\n'
+                 'flow f udp 10.0.0.1:2222 > 10.0.0.2:53;\n'
+                 'f > (content:"b";);\n')
+        pkts = rdpcap(self.build(synth))
+        self.assertEqual([(p[UDP].sport, bytes(p[UDP].payload)) for p in pkts],
+                         [(1111, b'a'), (2222, b'b')])
+
+
 if __name__ == '__main__':
     unittest.main()
