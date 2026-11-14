@@ -229,19 +229,26 @@ Example:
 ##### tcp.seq Attribute #####
 The *tcp.seq* attribute lets you set the sequence number for the event's packet. If the content is split into several segments, they follow on from it. Values wrap at 2^32.
 
-Whether the flow moves depends on where the value falls:
+What happens next depends on where the value falls:
 
-- On a side's first packet, on a SYN, or when the packet ends past what that side has sent so far, the flow continues from it: the other side's ACK acknowledges it, and later packets from the same side follow on.
-- When the packet falls within data already sent (a retransmission or an overlapping segment), the flow stays where it was: the other side repeats its current ACK, and later packets continue from the end of the stream.
+- On a side's first packet or a SYN, the side's stream starts there.
+- When the packet ends past what that side has sent so far, later packets from that side follow on from it.
+- When the packet falls within data already sent (a retransmission or an overlapping segment), later packets continue from the end of the stream.
+
+The other side acknowledges data the way a real receiver does: up to the first byte it hasn't received. A packet that leaves a hole gets a duplicate ACK for the start of the hole, and once the hole is filled, the ACK covers everything received.
 
 Example:
 
     default > (content:"abc"; tcp.seq: 1000;);
     default > (content:"de";);
     default > (content:"AB"; tcp.seq: 1000;);
-    default > (content:"f";);
+    default > (content:"jk"; tcp.seq: 1009;);
+    default > (content:"fghi"; tcp.seq: 1005;);
 
-The first packet has sequence number 1000, the server acknowledges 1003, and the second packet has sequence number 1003. The third packet resends bytes 1000-1001 with different content; the server acknowledges 1005 again, and the fourth packet has sequence number 1005.
+- "abc" goes at 1000 and "de" at 1003; the server acknowledges 1003, then 1005.
+- "AB" resends bytes 1000-1001 with different content; the server acknowledges 1005 again.
+- "jk" at 1009 leaves a hole at 1005-1008, so the server acknowledges 1005 again.
+- "fghi" fills the hole, and the server acknowledges 1011. A packet without *tcp.seq* would go next at 1011.
 
 A flow's initial sequence numbers are random unless *tcp.client_isn* and *tcp.server_isn* set them. An absolute *tcp.seq* value only means something relative to a known sequence, so set those attributes, set *tcp.seq* on each side's first packet, or write the handshake yourself.
 
@@ -261,6 +268,12 @@ The *tcp.flags.ack* attribute tells Flowsynth to force the packet to be an ACK p
 
 ##### tcp.flags.synack Attribute #####
 The *tcp.flags.synack* attribute tells Flowsynth to force the packet to be a SYN/ACK packet.
+
+A SYN/ACK carries no data, so it gets no automatic ACK. When you write a handshake yourself, add the client's ACK as its own event:
+
+    default > (tcp.flags.syn;);
+    default < (tcp.flags.synack;);
+    default > (tcp.flags.ack;);
 
 ##### tcp.flags.fin Attribute #####
 The *tcp.flags.fin* attribute tells Flowsynth to send a FIN (with ACK) to close that side of the connection. If the event also has content, the FIN is set on the last data segment. Like a SYN, a FIN consumes one sequence number: the other side's ACK acknowledges it, and any later packets from the closing side continue after it.

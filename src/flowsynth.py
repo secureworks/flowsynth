@@ -23,6 +23,7 @@ from __future__ import print_function
 import argparse
 import calendar
 import datetime
+import ipaddress
 import logging
 import re
 import random
@@ -105,6 +106,8 @@ def _parse_start_time(value):
     if offset and offset.upper() != 'Z':
         offset = offset.replace(':', '')
         sign = -1 if offset[0] == '-' else 1
+        if int(offset[1:3]) > 23 or int(offset[3:5]) > 59:
+            raise ValueError("Invalid start time '%s'; bad UTC offset" % value)
         start = start - sign * (int(offset[1:3]) * 3600 + int(offset[3:5]) * 60)
     return start
 
@@ -123,9 +126,18 @@ def seq_after(a, b):
     """True if sequence number a is after b (RFC 1982 serial arithmetic)"""
     return 0 < (a - b) % 4294967296 < 2147483648
 
+def host_key(host):
+    """a host's address in canonical form, so one IPv6 address written two ways
+    is still one host"""
+    try:
+        return ipaddress.ip_address(u'%s' % host).compressed
+    except ValueError:
+        return host
+
 def host_mac(host):
     """return the default MAC for a host: random, unicast and locally administered,
     picked once per host and reused for every packet and flow involving it"""
+    host = host_key(host)
     if host not in HOST_MACS:
         octets = [RNG.getrandbits(8) for _ in range(6)]
         # clear the group (multicast) bit, set the locally administered bit
@@ -502,7 +514,7 @@ class Flow:
             if self._valid_mac(smac):
                 self.src_mac = smac
                 #later flows involving this host default to the same MAC
-                HOST_MACS.setdefault(self.src_host, smac)
+                HOST_MACS[host_key(self.src_host)] = smac
             else:
                 parser_bailout("A src_mac ({}) was explicitly set, but it doesn't appear to be valid.".format(smac))
 
@@ -513,7 +525,7 @@ class Flow:
             dmac = flowdecl['attributes']['dst_mac'].lower()
             if self._valid_mac(dmac):
                 self.dst_mac = dmac
-                HOST_MACS.setdefault(self.dst_host, dmac)
+                HOST_MACS[host_key(self.dst_host)] = dmac
             else:
                 parser_bailout("A dst_mac ({}) was explicitly set, but it doesn't appear to be valid.".format(dmac))
 
@@ -526,9 +538,18 @@ class Flow:
         for attr, side in (('tcp.client_isn', 'to_server_seq'), ('tcp.server_isn', 'to_client_seq')):
             if attr in flowdecl['attributes']:
                 setattr(self, side, Flow._isn(attr, flowdecl['attributes'][attr]))
+        #absolute tcp.seq/tcp.ack values can't be related to a random handshake; warn once
+        self.warn_absolute_seq = ('tcp.initialize' in flowdecl['attributes'] and not
+                                  ('tcp.client_isn' in flowdecl['attributes'] and 'tcp.server_isn' in flowdecl['attributes']))
         #whether each side has sent a TCP packet yet
         self.to_server_sent = False
         self.to_client_sent = False
+        #what each side's receiver has: the next seq it expects (its cumulative ACK),
+        #and segments received past a hole, as (start, end)
+        self.to_server_rcv = self.to_server_seq
+        self.to_client_rcv = self.to_client_seq
+        self.to_server_ooo = []
+        self.to_client_ooo = []
         self.tcp_server_bytes = 0
         self.tcp_client_bytes = 0
 
@@ -536,6 +557,33 @@ class Flow:
             self.tcp_mss = int(flowdecl['attributes']['mss'])
         except KeyError:
             self.tcp_mss = 1460
+
+    def _receive(self, side, start, end, restart):
+        """record that a segment [start, end) of one side's stream ('to_server' or
+        'to_client') reached the receiver, and return the receiver's cumulative ACK.
+        a segment past a hole is held until the hole is filled, so the ACK stays at
+        the hole (a duplicate ACK) as a real stack's would"""
+        rcv = getattr(self, side + '_rcv')
+        ooo = getattr(self, side + '_ooo')
+        if restart:
+            rcv = end
+            del ooo[:]
+        elif seq_after(start, rcv):
+            ooo.append((start, end))
+        elif seq_after(end, rcv):
+            rcv = end
+        #take in any held segments the stream has now reached
+        merged = True
+        while merged:
+            merged = False
+            for seg in list(ooo):
+                if not seq_after(seg[0], rcv):
+                    ooo.remove(seg)
+                    if seq_after(seg[1], rcv):
+                        rcv = seg[1]
+                    merged = True
+        setattr(self, side + '_rcv', rcv)
+        return rcv
 
     @staticmethod
     def _isn(attr, value):
@@ -695,7 +743,7 @@ class Flow:
                 #use the clients seq/ack
                 self.tcp_server_bytes = self.tcp_server_bytes + len(payload)
                 tcp_seq = self.to_server_seq
-                tcp_ack = self.to_client_seq
+                tcp_ack = self.to_client_rcv
                 logging.debug("*** Flow %s --> S:%s A:%s B:%s", self.name, tcp_seq, tcp_ack, self.tcp_server_bytes)
                 logging.debug("*** %s", self.timeline[eventid])
 
@@ -711,7 +759,7 @@ class Flow:
                 #use the servers seq/ack
                 self.tcp_client_bytes = self.tcp_client_bytes + len(payload)
                 tcp_seq = self.to_client_seq
-                tcp_ack = self.to_server_seq
+                tcp_ack = self.to_server_rcv
                 logging.debug("*** Flow %s <-- S:%s A:%s B:%s", self.name, tcp_seq, tcp_ack, self.tcp_client_bytes)
                 logging.debug("*** %s", self.timeline[eventid])
 
@@ -794,25 +842,26 @@ class Flow:
                 seq_len = payload_size
                 if 'S' in flags or 'F' in flags:
                     seq_len = seq_len + 1
+                pkt_seq = tcp_seq
                 seq_end = seq_add(tcp_seq, seq_len)
                 event_seq = seq_end
 
-                #the peer's ACK: its own next seq, acknowledging this packet. a manual
-                #tcp.ack only affects the event's own packet
+                #the peer's ACK: its own next seq, and what it has received of this side's
+                #stream up to the first hole. a manual tcp.ack only affects the event's own packet
                 if (event['flow'] == Flow.FLOW_TO_CLIENT):
-                    if (not manual_seq or not self.to_client_sent or 'S' in flags
-                            or seq_after(seq_end, self.to_client_seq)):
+                    restart = not self.to_client_sent or 'S' in flags
+                    if not manual_seq or restart or seq_after(seq_end, self.to_client_seq):
                         self.to_client_seq = seq_end
                     self.to_client_sent = True
                     tcp_seq = self.to_server_seq
-                    tcp_ack = self.to_client_seq
+                    tcp_ack = self._receive('to_client', pkt_seq, seq_end, restart)
                 else:
-                    if (not manual_seq or not self.to_server_sent or 'S' in flags
-                            or seq_after(seq_end, self.to_server_seq)):
+                    restart = not self.to_server_sent or 'S' in flags
+                    if not manual_seq or restart or seq_after(seq_end, self.to_server_seq):
                         self.to_server_seq = seq_end
                     self.to_server_sent = True
                     tcp_seq = self.to_client_seq
-                    tcp_ack = self.to_server_seq
+                    tcp_ack = self._receive('to_server', pkt_seq, seq_end, restart)
 
                 #a real stack doesn't acknowledge a segment that carries no data (or FIN)
                 if 'tcp.noack' not in event['attributes'] and (payload_size > 0 or 'F' in flags):
@@ -825,6 +874,11 @@ class Flow:
                     lyr_tcp = TCP(sport = dst_port, dport = src_port, flags='A', seq=tcp_seq, ack=tcp_ack)
                     pkt = lyr_eth / lyr_ip / lyr_tcp
                     pkts.append(pkt)
+                    #the ACK is the peer's packet too: its stream has started
+                    if (event['flow'] == Flow.FLOW_TO_CLIENT):
+                        self.to_server_sent = True
+                    else:
+                        self.to_client_sent = True
 
 
         logging.debug("*** End Render Flow")
@@ -1043,6 +1097,8 @@ def render_timeline():
             if getattr(ARGS, 'start_time', None) is not None:
                 #fixed timestamps instead of the wall clock, for reproducible output
                 pkt.time = ARGS.start_time + len(COMPILER_OUTPUT) * SEEDED_TIME_STEP
+                if pkt.time >= PCAP_MAX_TIME:
+                    compiler_bailout("The start time is too late: packet %d would be after 2106." % (len(COMPILER_OUTPUT) + 1))
             elif getattr(ARGS, 'seed', None) is not None:
                 pkt.time = SEEDED_START_TIME + len(COMPILER_OUTPUT) * SEEDED_TIME_STEP
             COMPILER_OUTPUT.append(pkt)
@@ -1078,8 +1134,12 @@ def process_instructions(instr):
                 #add an event instead
                 add_event(name, instr)
     except SynSyntaxError as e:
-        logging.critical("Syntax Error - %s" % (e.value))
-        sys.exit(0)
+        if getattr(ARGS, 'display', 'text') != 'text':
+            BUILD_STATUS['error'] = e.value
+            output_summary()
+        else:
+            logging.critical("Syntax Error - %s" % (e.value))
+        sys.exit(-1)
 
 
 def autogen_handshake(flowdecl):
@@ -1125,6 +1185,11 @@ def add_event(flowname, eventdecl):
     except KeyError:
         compiler_bailout("Flow [%s] has not been instantiated." % flowname)
     flow.timeline.append(eventdecl)
+
+    if flow.warn_absolute_seq and ('tcp.seq' in eventdecl['attributes'] or 'tcp.ack' in eventdecl['attributes']):
+        logging.warning("Flow %s sets tcp.seq/tcp.ack, but tcp.initialize uses random initial sequence "
+                        "numbers; set tcp.client_isn and tcp.server_isn (10 and 100 match Flowsynth 1.4)", flowname)
+        flow.warn_absolute_seq = False
 
     #create an eventref for the global compiler timeline, and add it to that timeline.
     #it holds the flow object itself, so a later redeclaration of the name doesn't affect it
