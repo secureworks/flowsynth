@@ -209,10 +209,17 @@ Example:
     default > ( content: "HTTP/1.1 200 OK\x0d\x0a\x0d\x0a"; filecontent: "index.html"; );
 
 ##### tcp.seq Attribute #####
-The *tcp.seq* attribute lets you set the sequence number for the event's packet.
+The *tcp.seq* attribute lets you set the sequence number for the event's packet. The flow continues from the value given: if the content is split into several segments, they follow on from it, the other side's ACK acknowledges it, and later packets from the same side continue after it. To return to the earlier sequence, set *tcp.seq* again on a later event.
+
+Example:
+
+    default > (content:"abc"; tcp.seq: 1000;);
+    default > (content:"de";);
+
+The first packet has sequence number 1000, the server acknowledges 1003, and the second packet has sequence number 1003.
 
 ##### tcp.ack Attribute #####
-The *tcp.ack* attribute lets you set the acknowledgement number for the event's packet.
+The *tcp.ack* attribute lets you set the acknowledgement number for the event's packet. It only affects that packet; the flow's sequence tracking is unchanged.
 
 ##### tcp.noack Attribute #####
 The *tcp.noack* attribute tells Flowsynth to not generate an ACK for this event.

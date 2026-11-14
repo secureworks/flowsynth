@@ -189,6 +189,38 @@ class TestTcpSequence(FlowsynthTestCase):
         self.assertEqual([str(p.flags) for p in tcp_pkts], ['S', 'SA', 'A', 'PA', 'A'])
         self.assert_seq_ack_consistent(tcp_pkts)
 
+    def test_manual_seq_moves_the_flow(self):
+        synth = ('flow f tcp 10.0.0.1:1234 > 10.0.0.2:80 (tcp.initialize;);\n'
+                 'f > (content:"abc"; tcp.seq: 1000;);\n'
+                 'f > (content:"de";);\n'
+                 'f < (content:"ok";);\n')
+        tcp_pkts = self.tcp_packets(self.build(synth))
+        manual, manual_ack, follow, follow_ack, resp, resp_ack = tcp_pkts[3:]
+        self.assertEqual(manual.seq, 1000)
+        self.assertEqual(manual_ack.ack, 1003)
+        self.assertEqual(follow.seq, 1003)
+        self.assertEqual(follow_ack.ack, 1005)
+        self.assertEqual(resp.ack, 1005)
+        self.assertEqual(resp_ack.seq, 1005)
+
+    def test_manual_seq_segmented(self):
+        synth = ('flow f tcp 10.0.0.1:1234 > 10.0.0.2:80 (tcp.initialize; mss: 4;);\n'
+                 'f > (content:"abcdefghij"; tcp.seq: 5000;);\n')
+        tcp_pkts = self.tcp_packets(self.build(synth))[3:]
+        self.assertEqual([p.seq for p in tcp_pkts[0::2]], [5000, 5004, 5008])
+        self.assertEqual([p.ack for p in tcp_pkts[1::2]], [5004, 5008, 5010])
+
+    def test_manual_ack_only_affects_its_packet(self):
+        synth = ('flow f tcp 10.0.0.1:1234 > 10.0.0.2:80 (tcp.initialize;);\n'
+                 'f > (content:"x"; tcp.ack: 7;);\n'
+                 'f < (content:"y";);\n')
+        tcp_pkts = self.tcp_packets(self.build(synth))
+        synack = tcp_pkts[1]
+        data, data_ack, resp = tcp_pkts[3:6]
+        self.assertEqual(data.ack, 7)
+        self.assertEqual(data_ack.seq, synack.seq + 1)
+        self.assertEqual(resp.seq, synack.seq + 1)
+
     def test_seq_wraps_at_32_bits(self):
         real_getrandbits = flowsynth.RNG.getrandbits
 

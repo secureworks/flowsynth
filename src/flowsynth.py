@@ -603,6 +603,7 @@ class Flow:
         # +-len payloads are OK, but dont get processed if they are zero-sized
         hasIterated = False
         while ((len(total_payload) > 0 and hasPayload == True) or (hasPayload == False and hasIterated == False)):
+            firstSegment = not hasIterated
             hasIterated = True
 
             if (hasPayload == True):
@@ -668,8 +669,9 @@ class Flow:
                 #generate tcp packet
                 logging.debug("TCP Packet")
 
-                #handle SEQ
-                if 'tcp.seq' in event['attributes']:
+                #handle SEQ. a manual seq applies to the first segment; the flow then
+                #continues from it, so later segments and packets follow on
+                if 'tcp.seq' in event['attributes'] and firstSegment:
                     logging.debug("tcp.seq has been set manually")
                     tcp_seq = event['attributes']['tcp.seq']
                     if (type(tcp_seq) == str):
@@ -726,13 +728,15 @@ class Flow:
                 if 'S' in flags or 'F' in flags:
                     seq_len = seq_len + 1
 
-                #the peer's ACK: its own next seq, acknowledging everything sent so far
-                tcp_seq = tcp_ack
+                #the peer's ACK: its own next seq, acknowledging this packet. a manual
+                #tcp.ack only affects the event's own packet
                 if (event['flow'] == Flow.FLOW_TO_CLIENT):
-                    self.to_client_seq = seq_add(self.to_client_seq, seq_len)
+                    self.to_client_seq = seq_add(tcp_seq, seq_len)
+                    tcp_seq = self.to_server_seq
                     tcp_ack = self.to_client_seq
                 else:
-                    self.to_server_seq = seq_add(self.to_server_seq, seq_len)
+                    self.to_server_seq = seq_add(tcp_seq, seq_len)
+                    tcp_seq = self.to_client_seq
                     tcp_ack = self.to_server_seq
 
                 #a real stack doesn't acknowledge a segment that carries no data (or FIN)
