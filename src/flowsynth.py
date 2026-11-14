@@ -111,9 +111,6 @@ class FSLexer:
     INSTR_FLOW = 0
     INSTR_EVENT = 1
 
-    status = 0    #status of the line lex
-    instr = 0
-
     instructions = []
     dnscache = {}
 
@@ -129,7 +126,6 @@ class FSLexer:
         self.dnscache = {}
 
         lexer = list(shlex.shlex(synfiledata))
-        itr_ctr = 0
         while len(lexer) > 0:
             token = lexer[0]
             #should be the start of a new line
@@ -140,7 +136,6 @@ class FSLexer:
                 #treat as an event
                 (eventdecl, lexer) = self.lex_event(lexer)
                 self.instructions.append(eventdecl)
-            itr_ctr = itr_ctr + 1
 
     def resolve_dns(self, shost):
         """Perform DNS lookups once per file, and cache the results. tested."""
@@ -416,7 +411,6 @@ class Flow:
     src_port = 0
     dst_host = ""
     dst_port = 0
-    initialized = False
 
     #tcp specific values
     to_server_seq = 0
@@ -538,11 +532,6 @@ class Flow:
     def render_payload(self, event):
         """ render all content matches into one payload value """
         byte_payload = bytearray()
-        for modifier in event['attributes']:
-            #logging.debug("Found modifier: %s", modifier)
-            keyword = modifier
-            value = event['attributes'][keyword]
-
         if 'contents' in event:
             for contentobj in event['contents']:
                 content_value = contentobj['value']
@@ -562,14 +551,12 @@ class Flow:
         #we need to strip quotes from the filepath
         filepath = filepath.strip()[1:-1]
         try:
-            fdata = bytearray()
             fptr = open(filepath,'rb')
             fdata = fptr.read()
             fptr.close()
             return fdata
         except IOError:
             raise SynCompileError("File not found -- %s" % filepath)
-            sys.exit(-1)
 
     @staticmethod
     def format_port(port):
