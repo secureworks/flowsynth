@@ -253,21 +253,23 @@ Example:
 A flow's initial sequence numbers are random unless *tcp.client_isn* and *tcp.server_isn* set them. An absolute *tcp.seq* or *tcp.ack* value only means something against a known sequence, so set both attributes on flows that use them. (A *tcp.seq* on a side's very first packet also sets its sequence, but the automatic ACK of the other side's data counts as a packet.) Flowsynth logs a warning when a value is compared with a random sequence number.
 
 ##### tcp.ack Attribute #####
-The *tcp.ack* attribute lets you set the acknowledgement number for the event's packet. It only affects that packet; the flow's sequence tracking is unchanged.
+The *tcp.ack* attribute lets you set the acknowledgement number for the event's packets (every segment, if the content is split by the MSS). It only affects that event; the flow's sequence tracking is unchanged.
 
 ##### tcp.noack Attribute #####
 The *tcp.noack* attribute tells Flowsynth to not generate an ACK for this event.
 
-Flowsynth generates an ACK from the other side only for packets that carry data. Packets without payload, such as a bare `tcp.flags.ack` event, get no automatic ACK. (Before version 1.5.0 they did, so synths with such events now produce fewer packets.)
+Flowsynth generates an ACK from the other side only for packets that carry data or a FIN. Other packets without payload, such as a bare `tcp.flags.ack` event, get no automatic ACK. (Before version 1.5.0 they did, so synths with such events now produce fewer packets.)
 
 ##### tcp.flags.syn Attribute #####
-The *tcp.flags.syn* attribute tells Flowsynth to force the packet to be a SYN packet.
+The *tcp.flags.syn* attribute tells Flowsynth to force the packet to be a SYN packet. If the event's content is split by the MSS, only the first segment is a SYN.
+
+A SYN consumes one sequence number, so a second SYN event follows on from the first. To send a retransmitted SYN, give it the same *tcp.seq* as the first; the same goes for a retransmitted FIN.
 
 ##### tcp.flags.ack Attribute #####
 The *tcp.flags.ack* attribute tells Flowsynth to force the packet to be an ACK packet.
 
 ##### tcp.flags.synack Attribute #####
-The *tcp.flags.synack* attribute tells Flowsynth to force the packet to be a SYN/ACK packet.
+The *tcp.flags.synack* attribute tells Flowsynth to force the packet to be a SYN/ACK packet (the first segment only, if the content is split by the MSS).
 
 A SYN/ACK carries no data, so it gets no automatic ACK. When you write a handshake yourself, add the client's ACK as its own event:
 

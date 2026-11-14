@@ -4,6 +4,7 @@ run with: python -m unittest discover tests  (or: python -m pytest tests)
 """
 import argparse
 import json
+import logging
 import os
 import shutil
 import struct
@@ -308,8 +309,11 @@ class TestTcpSequence(FlowsynthTestCase):
                  'f > (content:"GET"; tcp.seq: 1000; tcp.ack: 5000;);\n'
                  'f < (content:"200"; tcp.seq: 5000;);\n'
                  'f < (content:"more";);\n')
-        with self.assertNoLogs(level='WARNING'):
+        # assertNoLogs needs Python 3.10; log a marker and check it's the only warning
+        with self.assertLogs(level='WARNING') as logs:
             tcp_pkts = self.tcp_packets(self.build(synth))
+            logging.warning('marker')
+        self.assertEqual(logs.output, ['WARNING:root:marker'])
         self.assertEqual([p.seq for p in tcp_pkts[2::2]], [5000, 5003])
         self.assertEqual(tcp_pkts[-1].ack, 5007)
 
@@ -325,6 +329,58 @@ class TestTcpSequence(FlowsynthTestCase):
         tcp_pkts = self.tcp_packets(self.build(synth))[3:]
         self.assertEqual([str(p.flags) for p in tcp_pkts[0::2]], ['PA', 'PA', 'FPA'])
         self.assertEqual([p.ack for p in tcp_pkts[1::2]], [1004, 1008, 1011])
+
+    def test_syn_split_over_mss(self):
+        synth = ('flow f tcp 10.0.0.1:1234 > 10.0.0.2:80 (tcp.client_isn: 1000; tcp.server_isn: 5000; mss: 4;);\n'
+                 'f > (tcp.flags.syn; content:"abcdefghij";);\n'
+                 'f < (tcp.flags.synack;);\n')
+        tcp_pkts = self.tcp_packets(self.build(synth))
+        client = [p for p in tcp_pkts if p.sport == 1234]
+        self.assertEqual([(str(p.flags), p.seq) for p in client], [('S', 1000), ('PA', 1005), ('PA', 1009)])
+        self.assertEqual(tcp_pkts[-1].ack, 1011)
+
+    def test_retransmitted_syn_and_fin(self):
+        synth = ('flow f tcp 10.0.0.1:1234 > 10.0.0.2:80 (tcp.client_isn: 1000; tcp.server_isn: 5000;);\n'
+                 'f > (tcp.flags.syn;);\n'
+                 'f > (tcp.flags.syn; tcp.seq: 1000;);\n'
+                 'f < (tcp.flags.synack;);\n'
+                 'f > (tcp.flags.ack;);\n'
+                 'f > (tcp.flags.fin;);\n'
+                 'f > (tcp.flags.fin; tcp.seq: 1001;);\n')
+        tcp_pkts = self.tcp_packets(self.build(synth))
+        self.assertEqual([p.seq for p in tcp_pkts[:2]], [1000, 1000])
+        self.assertEqual(tcp_pkts[2].ack, 1001)
+        fins = [p for p in tcp_pkts if 'F' in str(p.flags)]
+        self.assertEqual([p.seq for p in fins], [1001, 1001])
+        self.assertEqual([p.ack for p in tcp_pkts[-3::2]], [1002, 1002])
+
+    def test_manual_ack_on_every_segment(self):
+        synth = self.flow(mss=4) + 'f > (content:"abcdefghij"; tcp.ack: 7;);\n'
+        tcp_pkts = self.tcp_packets(self.build(synth))[3:]
+        self.assertEqual([p.ack for p in tcp_pkts[0::2]], [7, 7, 7])
+
+    def test_attributes_need_valid_values(self):
+        flow = 'flow f tcp 10.0.0.1:1234 > 10.0.0.2:80 (%s);\nf > (content:"a"; %s);\n'
+        for flow_attrs, event_attrs, error in (
+                ('src_mac;', '', 'src_mac needs a value'), ('dst_mac;', '', 'dst_mac needs a value'),
+                ('mss;', '', 'mss needs a value'), ('tcp.client_isn;', '', 'tcp.client_isn needs a value'),
+                ('', 'tcp.seq;', 'tcp.seq needs a value'), ('', 'tcp.ack;', 'tcp.ack needs a value'),
+                ('', 'tcp.seq: abc;', 'tcp.seq (abc) must be an integer'),
+                ('', 'tcp.ack: 1x;', 'tcp.ack (1x) must be an integer')):
+            synth = flow % (flow_attrs or 'mss: 1460;', event_attrs)
+            with self.assertLogs(level='CRITICAL') as logs, self.assertRaises(SystemExit):
+                self.build(synth)
+            self.assertIn(error, '\n'.join(logs.output))
+
+    def test_malformed_input_is_a_syntax_error(self):
+        # these used to loop forever or raise IndexError
+        for synth, error in (('flow f tcp 10.0.0.1:1 > 10.0.0.2:2 (mss: 1460\n', 'Unterminated attribute list'),
+                             ('flow f tcp 10.0.0.1:1 > 10.0.0.2:2;\nf > (content:"a"\n', 'Unterminated attribute list'),
+                             ('<!DOCTYPE html>\n<html lang="en">\n', 'Unexpected flow directionality'),
+                             ('flow f tcp 10.0.0.1:1 > 10.0.0.2:2;\nf >\n', 'Unexpected end of input')):
+            with self.assertLogs(level='CRITICAL') as logs, self.assertRaises(SystemExit):
+                self.build(synth)
+            self.assertIn(error, '\n'.join(logs.output))
 
     def test_fin_with_manual_seq(self):
         synth = self.flow() + ('f > (content:"abc";);\n'
@@ -541,6 +597,7 @@ class TestStartTime(FlowsynthTestCase):
         for bad in ('yesterday', '2026-13-01', '2026-11-14T25:00', 'nan', 'inf', '-5', '1960-01-01',
                     '2106-02-08', 2**32, -1, float('nan'), True, '2026-11-14T10:00:00+99:99'):
             self.assertRaises(ValueError, parse, bad)
+        self.assertRaisesRegex(ValueError, 'Invalid start time', parse, '2026-11-14T24:00:00')
 
     def test_start_time_with_seed(self):
         times = self.first_times(self.build(seed=1, start_time='2026-11-14T10:00:00Z'))

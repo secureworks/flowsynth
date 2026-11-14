@@ -68,6 +68,10 @@ RNG = random.Random()
 HOST_MACS = {}                  # one default MAC per host, shared across flows
 VALID_MAC_RE = re.compile(r'[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}$')
 
+#attributes that take a value; a bare 'mss;' parses as True
+VALUE_ATTRIBUTES = ('src_mac', 'dst_mac', 'mss', 'tcp.client_isn', 'tcp.server_isn', 'tcp.seq', 'tcp.ack')
+INTEGER_ATTRIBUTES = ('tcp.seq', 'tcp.ack')
+
 #packet timestamps used when a seed or start time is given, so output is byte-for-byte reproducible
 SEEDED_START_TIME = 946684800   # 2000-01-01 00:00:00 UTC; the default start time with a seed
 SEEDED_TIME_STEP = 0.001        # seconds between consecutive packets
@@ -105,7 +109,10 @@ def _parse_start_time(value):
         raise ValueError("Invalid start time '%s'; use epoch seconds or ISO-8601" % value)
     year, month, day, hour, minute, second = [int(field or 0) for field in mo.group(1, 2, 3, 4, 5, 6)]
     #datetime() validates the fields
-    start = calendar.timegm(datetime.datetime(year, month, day, hour, minute, second).timetuple())
+    try:
+        start = calendar.timegm(datetime.datetime(year, month, day, hour, minute, second).timetuple())
+    except ValueError as e:
+        raise ValueError("Invalid start time '%s'; %s" % (value, e))
     if mo.group(7):
         start = start + float(mo.group(7))
     offset = mo.group(8)
@@ -203,14 +210,18 @@ class FSLexer:
         lexer = list(shlex.shlex(synfiledata))
         while len(lexer) > 0:
             token = lexer[0]
-            #should be the start of a new line
-            if (token.lower() == 'flow'):
-                (flowdecl, lexer) = self.lex_flow(lexer[1:])
-                self.instructions.append(flowdecl)
-            else:
-                #treat as an event
-                (eventdecl, lexer) = self.lex_event(lexer)
-                self.instructions.append(eventdecl)
+            try:
+                #should be the start of a new line
+                if (token.lower() == 'flow'):
+                    (flowdecl, lexer) = self.lex_flow(lexer[1:])
+                    self.instructions.append(flowdecl)
+                else:
+                    #treat as an event
+                    (eventdecl, lexer) = self.lex_event(lexer)
+                    self.instructions.append(eventdecl)
+            except IndexError:
+                #a declaration cut short
+                parser_bailout("Invalid Syntax. Unexpected end of input.")
 
     def resolve_dns(self, shost):
         """Perform DNS lookups once per file, and cache the results. tested."""
@@ -349,6 +360,9 @@ class FSLexer:
                     else:
                         modifier_key = "%s%s" % (modifier_key, token)
                         tok_ctr = tok_ctr + 1
+                else:
+                    #ran out of input without ':' or ';'
+                    parser_bailout("Invalid Syntax. Unterminated attribute list.")
 
                 if (single_modifier == False):
                     modifier_value = ""
@@ -360,6 +374,8 @@ class FSLexer:
                         else:
                             modifier_value = "%s%s" % (modifier_value, token)
                             tok_ctr = tok_ctr + 1
+                    else:
+                        parser_bailout("Invalid Syntax. Unterminated attribute list.")
                 else:
                     modifier_value = True
 
@@ -421,6 +437,9 @@ class FSLexer:
                     else:
                         modifier_key = "%s%s" % (modifier_key, token)
                         tok_ctr = tok_ctr + 1
+                else:
+                    #ran out of input without ':' or ';'
+                    parser_bailout("Invalid Syntax. Unterminated attribute list.")
 
                 if (single_modifier == False):
                     modifier_value = ""
@@ -432,6 +451,8 @@ class FSLexer:
                         else:
                             modifier_value = "%s%s" % (modifier_value, token)
                             tok_ctr = tok_ctr + 1
+                    else:
+                        parser_bailout("Invalid Syntax. Unterminated attribute list.")
                 else:
                     modifier_value = True
 
@@ -816,8 +837,9 @@ class Flow:
                     tcp_ack = int(event['attributes']['tcp.ack']) % 4294967296
 
                 #check for tcp flags
+                #SYN and SYN/ACK go on the first segment only, like FIN on the last
                 if 'tcp.flags.syn' in event['attributes']:
-                    flags = "S"
+                    flags = 'S' if firstSegment else 'PA'
                 elif 'tcp.flags.fin' in event['attributes']:
                     #FIN with ACK; with a payload, FIN goes on the last segment only
                     if len(total_payload) > 0:
@@ -829,7 +851,7 @@ class Flow:
                 elif 'tcp.flags.ack' in event['attributes']:
                     flags = 'A'
                 elif 'tcp.flags.synack' in event['attributes']:
-                    flags = 'SA'
+                    flags = 'SA' if firstSegment else 'PA'
                 elif 'tcp.flags.rst' in event['attributes']:
                     flags = 'R'
                     #implied noack
@@ -1146,6 +1168,15 @@ def process_instructions(instr):
         #a MAC set explicitly for a host is that host's MAC in every flow that doesn't set
         #one, whichever order the flows come in (the first one set, if there are several)
         for instr in lexer.instructions:
+            for attr in VALUE_ATTRIBUTES:
+                value = instr.get('attributes', {}).get(attr)
+                if value is not None and not isinstance(value, str):
+                    parser_bailout("%s needs a value." % attr)
+                if attr in INTEGER_ATTRIBUTES and value is not None:
+                    try:
+                        int(value)
+                    except ValueError:
+                        parser_bailout("%s (%s) must be an integer." % (attr, value))
             if instr['type'] == 'flow':
                 for host, attr in (('src_host', 'src_mac'), ('dst_host', 'dst_mac')):
                     mac = instr['attributes'].get(attr)
