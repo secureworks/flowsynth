@@ -518,9 +518,14 @@ class Flow:
                 parser_bailout("A dst_mac ({}) was explicitly set, but it doesn't appear to be valid.".format(dmac))
 
 
-        #initial sequence numbers; tcp.initialize uses these as the ISNs
+        #initial sequence numbers; tcp.initialize uses these as the ISNs. random unless
+        #tcp.client_isn / tcp.server_isn are given (both are always drawn, so setting
+        #one doesn't change the build's other random values)
         self.to_server_seq = RNG.getrandbits(32)
         self.to_client_seq = RNG.getrandbits(32)
+        for attr, side in (('tcp.client_isn', 'to_server_seq'), ('tcp.server_isn', 'to_client_seq')):
+            if attr in flowdecl['attributes']:
+                setattr(self, side, Flow._isn(attr, flowdecl['attributes'][attr]))
         #whether each side has sent a TCP packet yet
         self.to_server_sent = False
         self.to_client_sent = False
@@ -531,6 +536,17 @@ class Flow:
             self.tcp_mss = int(flowdecl['attributes']['mss'])
         except KeyError:
             self.tcp_mss = 1460
+
+    @staticmethod
+    def _isn(attr, value):
+        """validate a tcp.client_isn / tcp.server_isn value"""
+        try:
+            isn = int(value)
+        except (TypeError, ValueError):
+            isn = -1
+        if not 0 <= isn < 4294967296:
+            parser_bailout("%s (%s) must be an integer from 0 to 4294967295." % (attr, value))
+        return isn
 
     def _valid_mac(self, mac):
         mac_re = r'[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}$'

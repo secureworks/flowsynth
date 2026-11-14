@@ -265,6 +265,43 @@ class TestTcpSequence(FlowsynthTestCase):
         data = self.tcp_packets(self.build(synth))[0]
         self.assertEqual((data.seq, data.ack), (5, 1))
 
+    def test_isn_attributes_restore_old_numbers(self):
+        # 1.4 synths that worked out absolute values from the old 10/100 ISNs
+        synth = ('flow f tcp 10.0.0.1:1234 > 10.0.0.2:80 (tcp.initialize; tcp.client_isn: 10; tcp.server_isn: 100;);\n'
+                 'f > (content:"abc";);\n'
+                 'f > (content:"abc"; tcp.seq: 11;);\n'
+                 'f < (content:"ok";);\n')
+        tcp_pkts = self.tcp_packets(self.build(synth))
+        syn, synack = tcp_pkts[:2]
+        self.assertEqual((syn.seq, synack.seq, synack.ack), (10, 100, 11))
+        data, data_ack, resent, resent_ack, resp = tcp_pkts[3:8]
+        self.assertEqual((data.seq, resent.seq), (11, 11))
+        self.assertEqual((data_ack.ack, resent_ack.ack), (14, 14))
+        self.assertEqual((resp.seq, resp.ack), (101, 14))
+
+    def test_isn_attributes_midstream(self):
+        synth = ('flow f tcp 10.0.0.1:1234 > 10.0.0.2:80 (tcp.client_isn: 4294967295; tcp.server_isn: 0;);\n'
+                 'f > (content:"ab";);\n'
+                 'f < (content:"c";);\n')
+        data, data_ack, resp, resp_ack = self.tcp_packets(self.build(synth))
+        self.assertEqual((data.seq, data_ack.ack), (4294967295, 1))
+        self.assertEqual((resp.seq, resp.ack, resp_ack.ack), (0, 1, 1))
+
+    def test_isn_attributes_keep_other_random_values(self):
+        base = 'flow f tcp 10.0.0.1:any > 10.0.0.2:80 (tcp.initialize;%s);\nf > (content:"x";);\n'
+        plain = rdpcap(self.build(base % '', seed=9, name='a'))
+        fixed = rdpcap(self.build(base % ' tcp.client_isn: 10;', seed=9, name='b'))
+        self.assertEqual(fixed[0][TCP].seq, 10)
+        self.assertEqual(fixed[1][TCP].seq, plain[1][TCP].seq)      # server ISN unchanged
+        self.assertEqual((fixed[0][TCP].sport, fixed[0][Ether].src), (plain[0][TCP].sport, plain[0][Ether].src))
+
+    def test_isn_attribute_invalid(self):
+        for bad in ('-1', '4294967296', 'ten', '1.5'):
+            flowdecl = {'name': 'f', 'l3_proto': flowsynth.Flow.PROTO_IPV4, 'l4_proto': flowsynth.Flow.PROTO_TCP,
+                        'src_host': '10.0.0.1', 'src_port': '1', 'dst_host': '10.0.0.2', 'dst_port': '2',
+                        'flow': '>', 'attributes': {'tcp.client_isn': bad}}
+            self.assertRaises(flowsynth.SynSyntaxError, flowsynth.Flow, flowdecl)
+
     def test_rst_has_no_ack(self):
         synth = self.flow() + 'f < (tcp.flags.rst;);\n'
         tcp_pkts = self.tcp_packets(self.build(synth))
