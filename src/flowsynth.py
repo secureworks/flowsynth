@@ -21,6 +21,12 @@
 from __future__ import print_function
 
 import argparse
+import calendar
+import datetime
+try:
+    import ipaddress
+except ImportError:     # Python 2 without the backport: compare host strings as written
+    ipaddress = None
 import logging
 import re
 import random
@@ -30,15 +36,16 @@ import socket
 import time
 import json
 from io import open
+from decimal import Decimal
 
 #include scapy; suppress all errors
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 logging.getLogger("scapy.interactive").setLevel(logging.ERROR)
 logging.getLogger("scapy.loading").setLevel(logging.ERROR)
-from scapy.all import Ether, IP, IPv6, TCP, UDP, RandMAC, hexdump, wrpcap, Raw
+from scapy.all import Ether, IP, IPv6, TCP, UDP, hexdump, wrpcap, Raw
 
 #global variables
-APP_VERSION_STRING = "1.4.1"
+APP_VERSION_STRING = "1.5.0"
 # Define the standard version indicator.
 __version__ = APP_VERSION_STRING
 LOGGING_LEVEL = logging.INFO
@@ -55,6 +62,103 @@ END_TIME = 0
 
 #for recording the build status
 BUILD_STATUS = {}
+
+#randomness (MACs, ISNs, 'any' ports). seeded per build; see run()
+RNG = random.Random()
+HOST_MACS = {}                  # one default MAC per host, shared across flows
+VALID_MAC_RE = re.compile(r'[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}$')
+
+#attributes that take a value; a bare 'mss;' parses as True
+VALUE_ATTRIBUTES = ('src_mac', 'dst_mac', 'mss', 'tcp.client_isn', 'tcp.server_isn', 'tcp.seq', 'tcp.ack')
+INTEGER_ATTRIBUTES = ('tcp.seq', 'tcp.ack')
+
+#packet timestamps used when a seed or start time is given, so output is byte-for-byte reproducible
+SEEDED_START_TIME = 946684800   # 2000-01-01 00:00:00 UTC; the default start time with a seed
+SEEDED_TIME_STEP = 0.001        # seconds between consecutive packets
+
+ISO_8601_RE = re.compile(r'^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(\.\d+)?)?)?\s*(Z|[+-]\d{2}:?\d{2})?$', re.IGNORECASE)
+
+PCAP_MAX_TIME = 4294967296     # pcap timestamps are unsigned 32-bit seconds
+
+def parse_start_time(value):
+    """return epoch seconds for a start time given as epoch seconds, an ISO-8601
+    date/time (UTC unless it has an offset), or a datetime (naive means UTC)"""
+    if value is None:
+        return None
+    start = _parse_start_time(value)
+    #pcap timestamps hold whole microseconds
+    if not (0 <= round(start, 6) < PCAP_MAX_TIME):
+        raise ValueError("Invalid start time '%s'; it must fall between 1970 and 2106" % value)
+    return start
+
+def _parse_start_time(value):
+    if isinstance(value, bool):
+        raise ValueError("Invalid start time '%s'; use epoch seconds or ISO-8601" % value)
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, datetime.datetime):
+        if value.utcoffset() is not None:
+            value = value - value.utcoffset()
+        return calendar.timegm(value.timetuple()) + value.microsecond / 1000000.0
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    mo = ISO_8601_RE.match(value.strip())
+    if mo is None:
+        raise ValueError("Invalid start time '%s'; use epoch seconds or ISO-8601" % value)
+    year, month, day, hour, minute, second = [int(field or 0) for field in mo.group(1, 2, 3, 4, 5, 6)]
+    #datetime() validates the fields
+    try:
+        start = calendar.timegm(datetime.datetime(year, month, day, hour, minute, second).timetuple())
+    except ValueError as e:
+        raise ValueError("Invalid start time '%s'; %s" % (value, e))
+    if mo.group(7):
+        start = start + float(mo.group(7))
+    offset = mo.group(8)
+    if offset and offset.upper() != 'Z':
+        offset = offset.replace(':', '')
+        sign = -1 if offset[0] == '-' else 1
+        if int(offset[1:3]) > 23 or int(offset[3:5]) > 59:
+            raise ValueError("Invalid start time '%s'; bad UTC offset" % value)
+        start = start - sign * (int(offset[1:3]) * 3600 + int(offset[3:5]) * 60)
+    return start
+
+def cli_start_time(value):
+    """argparse type for --start-time"""
+    try:
+        return parse_start_time(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e))
+
+def seq_add(seq, n):
+    """add n to a TCP sequence number, wrapping at 2**32"""
+    return (seq + n) % 4294967296
+
+def seq_after(a, b):
+    """True if sequence number a is after b (RFC 1982 serial arithmetic)"""
+    return 0 < (a - b) % 4294967296 < 2147483648
+
+def host_key(host):
+    """a host's address in canonical form, so one IPv6 address written two ways
+    is still one host"""
+    if ipaddress is None:
+        return host
+    try:
+        return ipaddress.ip_address(u'%s' % host).compressed
+    except ValueError:
+        return host
+
+def host_mac(host):
+    """return the default MAC for a host: random, unicast and locally administered,
+    picked once per host and reused for every packet and flow involving it"""
+    host = host_key(host)
+    if host not in HOST_MACS:
+        octets = [RNG.getrandbits(8) for _ in range(6)]
+        # clear the group (multicast) bit, set the locally administered bit
+        octets[0] = (octets[0] & 0xfc) | 0x02
+        HOST_MACS[host] = ':'.join('%02x' % octet for octet in octets)
+    return HOST_MACS[host]
 
 class SynSyntaxError(Exception):
     """ an exception for a syntax error when parsing a synfile """
@@ -89,9 +193,6 @@ class FSLexer:
     INSTR_FLOW = 0
     INSTR_EVENT = 1
 
-    status = 0    #status of the line lex
-    instr = 0
-
     instructions = []
     dnscache = {}
 
@@ -107,18 +208,20 @@ class FSLexer:
         self.dnscache = {}
 
         lexer = list(shlex.shlex(synfiledata))
-        itr_ctr = 0
         while len(lexer) > 0:
             token = lexer[0]
-            #should be the start of a new line
-            if (token.lower() == 'flow'):
-                (flowdecl, lexer) = self.lex_flow(lexer[1:])
-                self.instructions.append(flowdecl)
-            else:
-                #treat as an event
-                (eventdecl, lexer) = self.lex_event(lexer)
-                self.instructions.append(eventdecl)
-            itr_ctr = itr_ctr + 1
+            try:
+                #should be the start of a new line
+                if (token.lower() == 'flow'):
+                    (flowdecl, lexer) = self.lex_flow(lexer[1:])
+                    self.instructions.append(flowdecl)
+                else:
+                    #treat as an event
+                    (eventdecl, lexer) = self.lex_event(lexer)
+                    self.instructions.append(eventdecl)
+            except IndexError:
+                #a declaration cut short
+                parser_bailout("Invalid Syntax. Unexpected end of input.")
 
     def resolve_dns(self, shost):
         """Perform DNS lookups once per file, and cache the results. tested."""
@@ -240,8 +343,10 @@ class FSLexer:
             while tokens[0] != ";":
                 token = tokens[0]
                 if (token == ")"):
-                    #end of attribute spec. jump forward two (should always be ');')
+                    #end of attribute spec, which must be followed by ';'
                     tokens = tokens[1:]
+                    if not tokens or tokens[0] != ";":
+                        parser_bailout("Invalid Syntax. Expected ';' after ')'.")
                     break
                 modifier_key = ""
                 tok_ctr = 0
@@ -254,20 +359,34 @@ class FSLexer:
                         tokens = tokens[tok_ctr+1:]
                         single_modifier = True
                         break
+                    elif (token == ")"):
+                        #a bare attribute that ends the list; leave the ')' for the loop
+                        tokens = tokens[tok_ctr:]
+                        single_modifier = True
+                        break
                     else:
                         modifier_key = "%s%s" % (modifier_key, token)
                         tok_ctr = tok_ctr + 1
+                else:
+                    #ran out of input without ':' or ';'
+                    parser_bailout("Invalid Syntax. Unterminated attribute list.")
 
                 if (single_modifier == False):
                     modifier_value = ""
                     tok_ctr = 0
                     for token in tokens:
-                        if (token == ';' or token == ")"):
+                        if (token == ';'):
                             tokens = tokens[tok_ctr+1:]
+                            break
+                        elif (token == ")"):
+                            #the value ends the list; leave the ')' for the loop
+                            tokens = tokens[tok_ctr:]
                             break
                         else:
                             modifier_value = "%s%s" % (modifier_value, token)
                             tok_ctr = tok_ctr + 1
+                    else:
+                        parser_bailout("Invalid Syntax. Unterminated attribute list.")
                 else:
                     modifier_value = True
 
@@ -312,8 +431,10 @@ class FSLexer:
             while tokens[0] != ";":
                 token = tokens[0]
                 if (token == ")"):
-                    #end of attribute spec. jump forward two (should always be ');')
+                    #end of attribute spec, which must be followed by ';'
                     tokens = tokens[1:]
+                    if not tokens or tokens[0] != ";":
+                        parser_bailout("Invalid Syntax. Expected ';' after ')'.")
                     break
                 modifier_key = ""
                 tok_ctr = 0
@@ -326,23 +447,40 @@ class FSLexer:
                         tokens = tokens[tok_ctr+1:]
                         single_modifier = True
                         break
+                    elif (token == ")"):
+                        #a bare attribute that ends the list; leave the ')' for the loop
+                        tokens = tokens[tok_ctr:]
+                        single_modifier = True
+                        break
                     else:
                         modifier_key = "%s%s" % (modifier_key, token)
                         tok_ctr = tok_ctr + 1
+                else:
+                    #ran out of input without ':' or ';'
+                    parser_bailout("Invalid Syntax. Unterminated attribute list.")
 
                 if (single_modifier == False):
                     modifier_value = ""
                     tok_ctr = 0
                     for token in tokens:
-                        if (token == ';' or token == ")"):
+                        if (token == ';'):
                             tokens = tokens[tok_ctr+1:]
+                            break
+                        elif (token == ")"):
+                            #the value ends the list; leave the ')' for the loop
+                            tokens = tokens[tok_ctr:]
                             break
                         else:
                             modifier_value = "%s%s" % (modifier_value, token)
                             tok_ctr = tok_ctr + 1
+                    else:
+                        parser_bailout("Invalid Syntax. Unterminated attribute list.")
                 else:
                     modifier_value = True
 
+                if (modifier_key.lower() in ('content', 'filecontent', 'uricontent')
+                        and modifier_value is True):
+                    parser_bailout("%s needs a value." % modifier_key)
                 if (modifier_key.lower() == 'content'):
                     #content
                     eventdecl['contents'].append({'type': 'bytes', 'value': modifier_value})
@@ -394,14 +532,10 @@ class Flow:
     src_port = 0
     dst_host = ""
     dst_port = 0
-    initialized = False
-    timeline = []
 
     #tcp specific values
     to_server_seq = 0
     to_client_seq = 0
-    to_server_ack = 0
-    to_client_ack = 0
     tcp_mss = 1460
 
     #has test case
@@ -415,18 +549,20 @@ class Flow:
             self.l3_proto = flowdecl['l3_proto']
             self.l4_proto = flowdecl['l4_proto']
             self.src_host = flowdecl['src_host']
-            self.src_port = flowdecl['src_port']
+            self.src_port = Flow.format_port(flowdecl['src_port'])
             self.flow = flowdecl['flow']
             self.dst_host = flowdecl['dst_host']
-            self.dst_port = flowdecl['dst_port']
+            self.dst_port = Flow.format_port(flowdecl['dst_port'])
         except KeyError:
             parser_bailout("Invalid flowdecl passed to Flow.init")
 
-        self.src_mac = RandMAC()
-        self.dst_mac = RandMAC()
+        #this flow's events, indexed by the eventrefs in COMPILER_TIMELINE
+        self.timeline = []
 
-        #set a user-supplied source and destination mac, if provided
-        if 'src_mac' in flowdecl['attributes']:
+        #use a user-supplied source and destination mac if provided, else the host default
+        if 'src_mac' not in flowdecl['attributes']:
+            self.src_mac = host_mac(self.src_host)
+        else:
             logging.debug("Using user-supplied source mac")
             smac = flowdecl['attributes']['src_mac'].lower()
             if self._valid_mac(smac):
@@ -434,7 +570,9 @@ class Flow:
             else:
                 parser_bailout("A src_mac ({}) was explicitly set, but it doesn't appear to be valid.".format(smac))
 
-        if 'dst_mac' in flowdecl['attributes']:
+        if 'dst_mac' not in flowdecl['attributes']:
+            self.dst_mac = host_mac(self.dst_host)
+        else:
             logging.debug("Using user-supplied dest mac")
             dmac = flowdecl['attributes']['dst_mac'].lower()
             if self._valid_mac(dmac):
@@ -443,24 +581,93 @@ class Flow:
                 parser_bailout("A dst_mac ({}) was explicitly set, but it doesn't appear to be valid.".format(dmac))
 
 
-        self.to_server_seq = random.randint(10000, 99999)
-        self.to_client_seq = random.randint(10000, 99999)
-        self.to_server_ack = 0
-        self.to_client_ack = 0
+        #initial sequence numbers; tcp.initialize uses these as the ISNs. random unless
+        #tcp.client_isn / tcp.server_isn are given (both are always drawn, so setting
+        #one doesn't change the build's other random values)
+        self.to_server_seq = RNG.getrandbits(32)
+        self.to_client_seq = RNG.getrandbits(32)
+        for attr, side in (('tcp.client_isn', 'to_server_seq'), ('tcp.server_isn', 'to_client_seq')):
+            if attr in flowdecl['attributes']:
+                setattr(self, side, Flow._isn(attr, flowdecl['attributes'][attr]))
+        #whether each side's sequence numbers are known to the synfile's author: set by an
+        #ISN attribute, or started by a manual tcp.seq. absolute tcp.seq/tcp.ack values
+        #against a random sequence can't mean what was intended; warn once per flow
+        self.to_server_anchored = 'tcp.client_isn' in flowdecl['attributes']
+        self.to_client_anchored = 'tcp.server_isn' in flowdecl['attributes']
+        self.warned_absolute_seq = False
+        #whether each side has sent a TCP packet yet
+        self.to_server_sent = False
+        self.to_client_sent = False
+        #what each side's receiver has: the next seq it expects (its cumulative ACK),
+        #and segments received past a hole, as (start, end)
+        self.to_server_rcv = self.to_server_seq
+        self.to_client_rcv = self.to_client_seq
+        self.to_server_ooo = []
+        self.to_client_ooo = []
         self.tcp_server_bytes = 0
         self.tcp_client_bytes = 0
 
+        self.tcp_mss = 1460
+        if 'mss' in flowdecl['attributes']:
+            try:
+                self.tcp_mss = int(flowdecl['attributes']['mss'])
+            except (TypeError, ValueError):
+                self.tcp_mss = 0
+            if not 0 < self.tcp_mss < 65536:
+                parser_bailout("mss (%s) must be an integer from 1 to 65535." % flowdecl['attributes']['mss'])
+
+    def _check_anchored(self, side, peer, event, manual_seq, restart):
+        """note a stream started by a manual seq; warn about absolute values against a
+        random initial sequence number"""
+        if manual_seq and restart:
+            setattr(self, side + '_anchored', True)
+        unanchored = ((manual_seq and not getattr(self, side + '_anchored')) or
+                      ('tcp.ack' in event['attributes'] and not getattr(self, peer + '_anchored')))
+        if unanchored and not self.warned_absolute_seq:
+            logging.warning("Flow %s sets tcp.seq/tcp.ack against a random initial sequence number; "
+                            "set tcp.client_isn and tcp.server_isn (10 and 100 match Flowsynth 1.4)", self.name)
+            self.warned_absolute_seq = True
+
+    def _receive(self, side, start, end, restart):
+        """record that a segment [start, end) of one side's stream ('to_server' or
+        'to_client') reached the receiver, and return the receiver's cumulative ACK.
+        a segment past a hole is held until the hole is filled, so the ACK stays at
+        the hole (a duplicate ACK) as a real stack's would"""
+        rcv = getattr(self, side + '_rcv')
+        ooo = getattr(self, side + '_ooo')
+        if restart:
+            rcv = end
+            del ooo[:]
+        elif seq_after(start, rcv):
+            ooo.append((start, end))
+        elif seq_after(end, rcv):
+            rcv = end
+        #take in any held segments the stream has now reached
+        merged = True
+        while merged:
+            merged = False
+            for seg in list(ooo):
+                if not seq_after(seg[0], rcv):
+                    ooo.remove(seg)
+                    if seq_after(seg[1], rcv):
+                        rcv = seg[1]
+                    merged = True
+        setattr(self, side + '_rcv', rcv)
+        return rcv
+
+    @staticmethod
+    def _isn(attr, value):
+        """validate a tcp.client_isn / tcp.server_isn value"""
         try:
-            self.tcp_mss = int(flowdecl['attributes']['mss'])
-        except KeyError:
-            self.tcp_mss = 1460
+            isn = int(value)
+        except (TypeError, ValueError):
+            isn = -1
+        if not 0 <= isn < 4294967296:
+            parser_bailout("%s (%s) must be an integer from 0 to 4294967295." % (attr, value))
+        return isn
 
     def _valid_mac(self, mac):
-        mac_re = r'[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}'
-        valid_mac = re.match(mac_re, mac)
-        if valid_mac != None:
-            return True
-        return False
+        return VALID_MAC_RE.match(mac) is not None
 
     #has test case
     #This function expects all inputs to be enclosed within double quotes
@@ -516,11 +723,6 @@ class Flow:
     def render_payload(self, event):
         """ render all content matches into one payload value """
         byte_payload = bytearray()
-        for modifier in event['attributes']:
-            #logging.debug("Found modifier: %s", modifier)
-            keyword = modifier
-            value = event['attributes'][keyword]
-
         if 'contents' in event:
             for contentobj in event['contents']:
                 content_value = contentobj['value']
@@ -540,22 +742,21 @@ class Flow:
         #we need to strip quotes from the filepath
         filepath = filepath.strip()[1:-1]
         try:
-            fdata = bytearray()
             fptr = open(filepath,'rb')
             fdata = fptr.read()
             fptr.close()
             return fdata
         except IOError:
             raise SynCompileError("File not found -- %s" % filepath)
-            sys.exit(-1)
 
+    @staticmethod
     def format_port(port):
         """format a port specifier"""
         if type(port) == int:
             return int(port)
         elif type(port) == str and port.upper() == 'ANY':
             #return a random port between 1024 and 65k
-            return random.randint(1024, 65000)
+            return RNG.randint(1024, 65000)
         elif type(port) == str:
             try:
                 port = int(port)
@@ -579,7 +780,10 @@ class Flow:
         # 0-len payloads are OK, but only if no payload at beginning of render()
         # +-len payloads are OK, but dont get processed if they are zero-sized
         hasIterated = False
+        manual_seq = 'tcp.seq' in event['attributes']
+        event_seq = None    #next seq within a manual-seq event, for its later segments
         while ((len(total_payload) > 0 and hasPayload == True) or (hasPayload == False and hasIterated == False)):
+            firstSegment = not hasIterated
             hasIterated = True
 
             if (hasPayload == True):
@@ -605,14 +809,9 @@ class Flow:
                 #use the clients seq/ack
                 self.tcp_server_bytes = self.tcp_server_bytes + len(payload)
                 tcp_seq = self.to_server_seq
-                tcp_ack = self.to_server_ack
+                tcp_ack = self.to_client_rcv
                 logging.debug("*** Flow %s --> S:%s A:%s B:%s", self.name, tcp_seq, tcp_ack, self.tcp_server_bytes)
                 logging.debug("*** %s", self.timeline[eventid])
-
-                #nooooooooooo
-                if (len(payload) > 0):
-                    #set tcp ack to last ack
-                    tcp_ack = self.to_client_seq
 
             else:
                 #reverse src/dst
@@ -626,12 +825,9 @@ class Flow:
                 #use the servers seq/ack
                 self.tcp_client_bytes = self.tcp_client_bytes + len(payload)
                 tcp_seq = self.to_client_seq
-                tcp_ack = self.to_client_ack
+                tcp_ack = self.to_server_rcv
                 logging.debug("*** Flow %s <-- S:%s A:%s B:%s", self.name, tcp_seq, tcp_ack, self.tcp_client_bytes)
                 logging.debug("*** %s", self.timeline[eventid])
-
-                if (len(payload) > 0):
-                    tcp_ack = self.to_server_seq
 
             pkt = None
             logging.debug("SRC host: %s", src_host)
@@ -653,26 +849,34 @@ class Flow:
                 #generate tcp packet
                 logging.debug("TCP Packet")
 
-                #handle SEQ
-                if 'tcp.seq' in event['attributes']:
+                #handle SEQ. a manual seq applies to the first segment, and later
+                #segments of the event follow on from it
+                if manual_seq and firstSegment:
                     logging.debug("tcp.seq has been set manually")
-                    tcp_seq = event['attributes']['tcp.seq']
-                    if (type(tcp_seq) == str):
-                        tcp_seq = int(tcp_seq)
+                    tcp_seq = int(event['attributes']['tcp.seq']) % 4294967296
+                elif manual_seq:
+                    tcp_seq = event_seq
 
                 if 'tcp.ack' in event['attributes']:
                     logging.debug("tcp.ack has been set manually")
-                    tcp_ack = event['attributes']['tcp.ack']
-                    if (type(tcp_ack) == str):
-                        tcp_ack = int(tcp_ack)
+                    tcp_ack = int(event['attributes']['tcp.ack']) % 4294967296
 
                 #check for tcp flags
+                #SYN and SYN/ACK go on the first segment only, like FIN on the last
                 if 'tcp.flags.syn' in event['attributes']:
-                    flags = "S"
+                    flags = 'S' if firstSegment else 'PA'
+                elif 'tcp.flags.fin' in event['attributes']:
+                    #FIN with ACK; with a payload, FIN goes on the last segment only
+                    if len(total_payload) > 0:
+                        flags = 'PA'
+                    elif len(payload) > 0:
+                        flags = 'FPA'
+                    else:
+                        flags = 'FA'
                 elif 'tcp.flags.ack' in event['attributes']:
                     flags = 'A'
                 elif 'tcp.flags.synack' in event['attributes']:
-                    flags = 'SA'
+                    flags = 'SA' if firstSegment else 'PA'
                 elif 'tcp.flags.rst' in event['attributes']:
                     flags = 'R'
                     #implied noack
@@ -680,9 +884,14 @@ class Flow:
                 else:
                     flags = 'PA'
 
-                logging.debug('Data packet with inferred flags S:%s A:%s', tcp_seq, tcp_ack)
+                #the ack field is only meaningful with the ACK flag set; leave it zero otherwise
+                pkt_ack = tcp_ack
+                if 'A' not in flags and 'tcp.ack' not in event['attributes']:
+                    pkt_ack = 0
+
+                logging.debug('Data packet with inferred flags S:%s A:%s', tcp_seq, pkt_ack)
                 # the 'payload' variable is a bytearray so make sure we pass it to scapy with Raw().
-                lyr_tcp = TCP(flags=flags, seq=tcp_seq, ack=tcp_ack, sport = src_port, dport = dst_port) / Raw(payload)
+                lyr_tcp = TCP(flags=flags, seq=tcp_seq, ack=pkt_ack, sport = src_port, dport = dst_port) / Raw(payload)
                 pkt = lyr_eth / lyr_ip / lyr_tcp
                 pkts.append(pkt)
 
@@ -693,34 +902,41 @@ class Flow:
 
                 logging.debug("Moving to ACKnowledgement stage")
 
-                #send an ACK
+                #advance the sender's next sequence number; SYN and FIN each count as one.
+                #a manual seq moves the flow only when it starts the side's stream (its
+                #first packet, or a SYN) or ends past it; a segment resent behind the
+                #stream (retransmission, overlap) leaves it where it is
+                seq_len = payload_size
+                if 'S' in flags or 'F' in flags:
+                    seq_len = seq_len + 1
+                pkt_seq = tcp_seq
+                seq_end = seq_add(tcp_seq, seq_len)
+                event_seq = seq_end
+
+                #the peer's ACK: its own next seq, and what it has received of this side's
+                #stream up to the first hole. a manual tcp.ack only affects the event's own packet
                 if (event['flow'] == Flow.FLOW_TO_CLIENT):
-                    logging.debug('SERVER requires ACK: Flow is TO_CLIENT')
-                    #flow is SERVER -> CLIENT. Use SERVERs TCP SEQ #s
-                    logging.debug("self.to_client_seq %s" % self.to_client_seq)
-                    logging.debug("self.to_client_ack %s" % self.to_client_ack)
-                    logging.debug("len payload %s" % len(payload))
-
-                    tcp_seq = tcp_ack
-                    tcp_ack = self.to_client_seq + len(payload)
-
-                    self.to_client_ack = self.to_client_seq + len(payload)
-                    self.to_client_seq = self.to_client_ack
-
+                    restart = not self.to_client_sent or 'S' in flags
+                    if firstSegment:
+                        self._check_anchored('to_client', 'to_server', event, manual_seq, restart)
+                    #a manual seq ahead of the stream moves it on; one without data (or SYN/FIN) doesn't
+                    if not manual_seq or restart or (seq_len > 0 and seq_after(seq_end, self.to_client_seq)):
+                        self.to_client_seq = seq_end
+                    self.to_client_sent = True
+                    tcp_seq = self.to_server_seq
+                    tcp_ack = self._receive('to_client', pkt_seq, seq_end, restart)
                 else:
-                    logging.debug('CLIENT requires ACK: Flow is TO_SERVER')
+                    restart = not self.to_server_sent or 'S' in flags
+                    if firstSegment:
+                        self._check_anchored('to_server', 'to_client', event, manual_seq, restart)
+                    if not manual_seq or restart or (seq_len > 0 and seq_after(seq_end, self.to_server_seq)):
+                        self.to_server_seq = seq_end
+                    self.to_server_sent = True
+                    tcp_seq = self.to_client_seq
+                    tcp_ack = self._receive('to_server', pkt_seq, seq_end, restart)
 
-                    tmp_ack = self.to_server_seq
-                    tmp_seq = self.to_server_ack
-
-                    tcp_seq = tcp_ack
-                    tcp_ack = tmp_ack + payload_size
-
-
-                    self.to_server_ack = self.to_server_seq + payload_size
-                    self.to_server_seq = self.to_server_ack
-
-                if 'tcp.noack' not in event['attributes']:
+                #a real stack doesn't acknowledge a segment that carries no data (or FIN)
+                if 'tcp.noack' not in event['attributes'] and (payload_size > 0 or 'F' in flags):
                     logging.debug('INFERRED ACK: S:%s A:%s', tcp_seq, tcp_ack)
                     lyr_eth = Ether(src = dst_mac, dst=src_mac)
                     if self.l3_proto == Flow.PROTO_IPV4:
@@ -730,13 +946,18 @@ class Flow:
                     lyr_tcp = TCP(sport = dst_port, dport = src_port, flags='A', seq=tcp_seq, ack=tcp_ack)
                     pkt = lyr_eth / lyr_ip / lyr_tcp
                     pkts.append(pkt)
+                    #the ACK is the peer's packet too: its stream has started
+                    if (event['flow'] == Flow.FLOW_TO_CLIENT):
+                        self.to_server_sent = True
+                    else:
+                        self.to_client_sent = True
 
 
         logging.debug("*** End Render Flow")
 
         logging.debug("**Flow State Table **")
-        logging.debug("to_server S: %s A: %s", self.to_server_seq, self.to_server_ack)
-        logging.debug("to_client S: %s A: %s", self.to_client_seq, self.to_client_ack)
+        logging.debug("to_server S: %s", self.to_server_seq)
+        logging.debug("to_client S: %s", self.to_client_seq)
         logging.debug("*********************\n\n")
 
         return pkts
@@ -757,6 +978,10 @@ def parse_cmd_line():
     parser.add_argument('-d', dest='debug', action='store_true', default=False, help='Run in debug mode')
     parser.add_argument('--display', dest='display', action='store', default='text', choices=['text','json'], help='Display format')
     parser.add_argument('--no-filecontent', dest='no_filecontent', action='store_true', default=False, help='Disable support for the filecontent attribute')
+    parser.add_argument('--seed', dest='seed', action='store', type=int, default=None,
+        help='Seed for random values (MACs, TCP ISNs, \'any\' ports). Also fixes packet\ntimestamps, so the same input and seed give an identical pcap.')
+    parser.add_argument('--start-time', dest='start_time', action='store', type=cli_start_time, default=None,
+        help='Timestamp of the first packet, as epoch seconds or ISO-8601 (UTC unless an\noffset is given); later packets follow at 1ms intervals. Default with --seed:\n2000-01-01T00:00:00Z. Without --seed or --start-time, timestamps are the build time.')
 
     args = parser.parse_args()
 
@@ -785,7 +1010,7 @@ def main():
 class Model():
     """main class."""
 
-    def __init__(self, input, output_format="pcap", output_file="", quiet=False, debug=False, display="text", no_filecontent=False):
+    def __init__(self, input, output_format="pcap", output_file="", quiet=False, debug=False, display="text", no_filecontent=False, seed=None, start_time=None):
         """constructor"""
         global ARGS, LOGGING_LEVEL, COMPILER_FLOWS, COMPILER_OUTPUT, COMPILER_TIMELINE, START_TIME, END_TIME, BUILD_STATUS
 
@@ -809,6 +1034,8 @@ class Model():
         ARGS.debug = debug
         ARGS.display = display
         ARGS.no_filecontent = no_filecontent
+        ARGS.seed = seed
+        ARGS.start_time = parse_start_time(start_time)
 
         if (ARGS.debug == True):
             LOGGING_LEVEL = logging.DEBUG
@@ -825,9 +1052,16 @@ class Model():
 
 def run(sFile):
     """ executes the compiler """
-    global BUILD_STATUS
+    global BUILD_STATUS, COMPILER_FLOWS, COMPILER_OUTPUT, COMPILER_TIMELINE, COMPILER_INSTRUCTIONS
+
+    #start every build from empty compiler state
+    COMPILER_FLOWS = {}
+    COMPILER_OUTPUT = []
+    COMPILER_TIMELINE = []
+    COMPILER_INSTRUCTIONS = []
 
     #initialize the build status
+    BUILD_STATUS.clear()
     BUILD_STATUS['app_version'] = APP_VERSION_STRING
     BUILD_STATUS['successful'] = False
     BUILD_STATUS['compiler'] = {}
@@ -836,6 +1070,10 @@ def run(sFile):
     BUILD_STATUS['compiler']['instructions'] = -1
     BUILD_STATUS['compiler']['events'] = -1
     BUILD_STATUS['compiler']['packets'] = -1
+
+    #seed the random values for this build; no seed means OS-supplied randomness
+    RNG.seed(getattr(ARGS, 'seed', None))
+    HOST_MACS.clear()
 
     #load the syn file
     logging.debug("Entering file loading phase")
@@ -922,12 +1160,22 @@ def render_timeline():
     global COMPILER_FLOWS
 
     for eventref in COMPILER_TIMELINE:
-        flowname = eventref['flow']
+        flow = eventref['flow']
         eventid = eventref['event']
 
         #have the flow render the pkt, and add it to our global output queue
-        pkts = COMPILER_FLOWS[flowname].render(eventid)
+        pkts = flow.render(eventid)
         for pkt in pkts:
+            start = getattr(ARGS, 'start_time', None)
+            if start is None and getattr(ARGS, 'seed', None) is not None:
+                start = SEEDED_START_TIME
+            if start is not None:
+                #fixed timestamps instead of the wall clock, for reproducible output; counted
+                #in whole microseconds so float rounding can't produce an invalid pcap time
+                usec = int(round(start * 1000000)) + len(COMPILER_OUTPUT) * int(round(SEEDED_TIME_STEP * 1000000))
+                if usec >= PCAP_MAX_TIME * 1000000:
+                    compiler_bailout("The start time is too late: packet %d would be after 2106." % (len(COMPILER_OUTPUT) + 1))
+                pkt.time = Decimal(usec) / Decimal(1000000)
             COMPILER_OUTPUT.append(pkt)
 
 def process_instructions(instr):
@@ -942,11 +1190,30 @@ def process_instructions(instr):
 
         COMPILER_INSTRUCTIONS = lexer.instructions
 
+        #a MAC set explicitly for a host is that host's MAC in every flow that doesn't set
+        #one, whichever order the flows come in (the first one set, if there are several)
+        for instr in lexer.instructions:
+            for attr in VALUE_ATTRIBUTES:
+                value = instr.get('attributes', {}).get(attr)
+                if value is not None and not isinstance(value, str):
+                    parser_bailout("%s needs a value." % attr)
+                if attr in INTEGER_ATTRIBUTES and value is not None:
+                    try:
+                        int(value)
+                    except ValueError:
+                        parser_bailout("%s (%s) must be an integer." % (attr, value))
+            if instr['type'] == 'flow':
+                for host, attr in (('src_host', 'src_mac'), ('dst_host', 'dst_mac')):
+                    mac = instr['attributes'].get(attr)
+                    if mac and host in instr and VALID_MAC_RE.match(mac.lower()):
+                        HOST_MACS.setdefault(host_key(instr[host]), mac.lower())
+
         for instr in lexer.instructions:
             name = instr['name']
             if instr['type'] == 'flow':
                 #check if flow exists already ?
                 if name in COMPILER_FLOWS:
+                    #events from here on use the new flow; earlier events keep the old one
                     logging.warning("Flow '%s' being redeclared!", name)
 
                 #add the flow to the timeline
@@ -960,61 +1227,28 @@ def process_instructions(instr):
                 #add an event instead
                 add_event(name, instr)
     except SynSyntaxError as e:
-        logging.critical("Syntax Error - %s" % (e.value))
-        sys.exit(0)
+        if getattr(ARGS, 'display', 'text') != 'text':
+            BUILD_STATUS['error'] = e.value
+            output_summary()
+        else:
+            logging.critical("Syntax Error - %s" % (e.value))
+        sys.exit(-1)
 
 
 def autogen_handshake(flowdecl):
     """generate render events for the tcp three-way handshake"""
-    global COMPILER_TIMELINE
-    global COMPILER_FLOWS
 
-    parent_flow = COMPILER_FLOWS[flowdecl['name']]
-
-    client_isn = 10    #random.randint(10000, 99999)
-    server_isn = 100   #random.randint(10000, 99999)
-
-    #send syn
-    eventdecl = {}
-    eventdecl['name'] = flowdecl['name']
-    eventdecl['type'] = 'event'
-    eventdecl['flow'] = Flow.FLOW_TO_SERVER
-    eventdecl['attributes'] = {}
-    eventdecl['attributes']['tcp.flags.syn'] = True
-    eventdecl['attributes']['tcp.noack'] = True
-    eventdecl['attributes']['tcp.seq'] = client_isn
-    eventdecl['attributes']['tcp.ack'] = None
-    add_event(flowdecl['name'], eventdecl)
-
-    #send synack
-    eventdecl = {}
-    eventdecl['name'] = flowdecl['name']
-    eventdecl['type'] = 'event'
-    eventdecl['flow'] = Flow.FLOW_TO_CLIENT
-    eventdecl['attributes'] = {}
-    eventdecl['attributes']['tcp.flags.synack'] = True
-    eventdecl['attributes']['tcp.noack'] = True
-    eventdecl['attributes']['tcp.seq'] = server_isn
-    eventdecl['attributes']['tcp.ack'] = client_isn + 1
-    add_event(flowdecl['name'], eventdecl)
-
-    #send ack
-    eventdecl = {}
-    eventdecl['name'] = flowdecl['name']
-    eventdecl['type'] = 'event'
-    eventdecl['flow'] = Flow.FLOW_TO_SERVER
-    eventdecl['attributes'] = {}
-    eventdecl['attributes']['tcp.flags.ack'] = True
-    eventdecl['attributes']['tcp.noack'] = True
-    eventdecl['attributes']['tcp.ack'] = server_isn + 1
-    eventdecl['attributes']['tcp.seq'] = client_isn + 1
-    add_event(flowdecl['name'], eventdecl)
-
-    #dont set the parent flows SEQ/ACK until the end of this process
-    parent_flow.to_server_seq = client_isn + 1
-    parent_flow.to_client_seq = server_isn + 1
-    parent_flow.to_server_ack = client_isn
-    parent_flow.to_client_ack = server_isn + 1
+    #the flow's initial sequence numbers (random 32-bit values) are the ISNs; the
+    #SYN and SYN/ACK each consume one, as rendered
+    for flow, flag in ((Flow.FLOW_TO_SERVER, 'tcp.flags.syn'),
+                       (Flow.FLOW_TO_CLIENT, 'tcp.flags.synack'),
+                       (Flow.FLOW_TO_SERVER, 'tcp.flags.ack')):
+        eventdecl = {}
+        eventdecl['name'] = flowdecl['name']
+        eventdecl['type'] = 'event'
+        eventdecl['flow'] = flow
+        eventdecl['attributes'] = {flag: True, 'tcp.noack': True}
+        add_event(flowdecl['name'], eventdecl)
 
 
 #has test case
@@ -1040,12 +1274,14 @@ def add_event(flowname, eventdecl):
 
     #save the eventdecl to the flows local timeline
     try:
-        COMPILER_FLOWS[flowname].timeline.append(eventdecl)
+        flow = COMPILER_FLOWS[flowname]
     except KeyError:
         compiler_bailout("Flow [%s] has not been instantiated." % flowname)
+    flow.timeline.append(eventdecl)
 
-    #create an eventref for the global compiler timeline, and add it to that timeline
-    eventref = {'flow': flowname, 'event': len(COMPILER_FLOWS[flowname].timeline)-1}
+    #create an eventref for the global compiler timeline, and add it to that timeline.
+    #it holds the flow object itself, so a later redeclaration of the name doesn't affect it
+    eventref = {'flow': flow, 'event': len(flow.timeline)-1}
     COMPILER_TIMELINE.append(eventref)
 
 #has test case
