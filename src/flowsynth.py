@@ -68,10 +68,22 @@ SEEDED_TIME_STEP = 0.001        # seconds between consecutive packets
 
 ISO_8601_RE = re.compile(r'^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(\.\d+)?)?)?\s*(Z|[+-]\d{2}:?\d{2})?$', re.IGNORECASE)
 
+PCAP_MAX_TIME = 4294967296     # pcap timestamps are unsigned 32-bit seconds
+
 def parse_start_time(value):
     """return epoch seconds for a start time given as epoch seconds, an ISO-8601
     date/time (UTC unless it has an offset), or a datetime (naive means UTC)"""
-    if value is None or isinstance(value, (int, float)):
+    if value is None:
+        return None
+    start = _parse_start_time(value)
+    if not (0 <= start < PCAP_MAX_TIME):
+        raise ValueError("Invalid start time '%s'; it must fall between 1970 and 2106" % value)
+    return start
+
+def _parse_start_time(value):
+    if isinstance(value, bool):
+        raise ValueError("Invalid start time '%s'; use epoch seconds or ISO-8601" % value)
+    if isinstance(value, (int, float)):
         return value
     if isinstance(value, datetime.datetime):
         if value.utcoffset() is not None:
@@ -106,6 +118,10 @@ def cli_start_time(value):
 def seq_add(seq, n):
     """add n to a TCP sequence number, wrapping at 2**32"""
     return (seq + n) % 4294967296
+
+def seq_after(a, b):
+    """True if sequence number a is after b (RFC 1982 serial arithmetic)"""
+    return 0 < (a - b) % 4294967296 < 2147483648
 
 def host_mac(host):
     """return the default MAC for a host: random, unicast and locally administered,
@@ -485,6 +501,8 @@ class Flow:
             smac = flowdecl['attributes']['src_mac'].lower()
             if self._valid_mac(smac):
                 self.src_mac = smac
+                #later flows involving this host default to the same MAC
+                HOST_MACS.setdefault(self.src_host, smac)
             else:
                 parser_bailout("A src_mac ({}) was explicitly set, but it doesn't appear to be valid.".format(smac))
 
@@ -495,6 +513,7 @@ class Flow:
             dmac = flowdecl['attributes']['dst_mac'].lower()
             if self._valid_mac(dmac):
                 self.dst_mac = dmac
+                HOST_MACS.setdefault(self.dst_host, dmac)
             else:
                 parser_bailout("A dst_mac ({}) was explicitly set, but it doesn't appear to be valid.".format(dmac))
 
@@ -502,6 +521,9 @@ class Flow:
         #initial sequence numbers; tcp.initialize uses these as the ISNs
         self.to_server_seq = RNG.getrandbits(32)
         self.to_client_seq = RNG.getrandbits(32)
+        #whether each side has sent a TCP packet yet
+        self.to_server_sent = False
+        self.to_client_sent = False
         self.tcp_server_bytes = 0
         self.tcp_client_bytes = 0
 
@@ -628,6 +650,8 @@ class Flow:
         # 0-len payloads are OK, but only if no payload at beginning of render()
         # +-len payloads are OK, but dont get processed if they are zero-sized
         hasIterated = False
+        manual_seq = 'tcp.seq' in event['attributes']
+        event_seq = None    #next seq within a manual-seq event, for its later segments
         while ((len(total_payload) > 0 and hasPayload == True) or (hasPayload == False and hasIterated == False)):
             firstSegment = not hasIterated
             hasIterated = True
@@ -695,19 +719,17 @@ class Flow:
                 #generate tcp packet
                 logging.debug("TCP Packet")
 
-                #handle SEQ. a manual seq applies to the first segment; the flow then
-                #continues from it, so later segments and packets follow on
-                if 'tcp.seq' in event['attributes'] and firstSegment:
+                #handle SEQ. a manual seq applies to the first segment, and later
+                #segments of the event follow on from it
+                if manual_seq and firstSegment:
                     logging.debug("tcp.seq has been set manually")
-                    tcp_seq = event['attributes']['tcp.seq']
-                    if (type(tcp_seq) == str):
-                        tcp_seq = int(tcp_seq)
+                    tcp_seq = int(event['attributes']['tcp.seq']) % 4294967296
+                elif manual_seq:
+                    tcp_seq = event_seq
 
                 if 'tcp.ack' in event['attributes']:
                     logging.debug("tcp.ack has been set manually")
-                    tcp_ack = event['attributes']['tcp.ack']
-                    if (type(tcp_ack) == str):
-                        tcp_ack = int(tcp_ack)
+                    tcp_ack = int(event['attributes']['tcp.ack']) % 4294967296
 
                 #check for tcp flags
                 if 'tcp.flags.syn' in event['attributes']:
@@ -749,19 +771,30 @@ class Flow:
 
                 logging.debug("Moving to ACKnowledgement stage")
 
-                #advance the sender's next sequence number; SYN and FIN each count as one
+                #advance the sender's next sequence number; SYN and FIN each count as one.
+                #a manual seq moves the flow only when it starts the side's stream (its
+                #first packet, or a SYN) or ends past it; a segment resent behind the
+                #stream (retransmission, overlap) leaves it where it is
                 seq_len = payload_size
                 if 'S' in flags or 'F' in flags:
                     seq_len = seq_len + 1
+                seq_end = seq_add(tcp_seq, seq_len)
+                event_seq = seq_end
 
                 #the peer's ACK: its own next seq, acknowledging this packet. a manual
                 #tcp.ack only affects the event's own packet
                 if (event['flow'] == Flow.FLOW_TO_CLIENT):
-                    self.to_client_seq = seq_add(tcp_seq, seq_len)
+                    if (not manual_seq or not self.to_client_sent or 'S' in flags
+                            or seq_after(seq_end, self.to_client_seq)):
+                        self.to_client_seq = seq_end
+                    self.to_client_sent = True
                     tcp_seq = self.to_server_seq
                     tcp_ack = self.to_client_seq
                 else:
-                    self.to_server_seq = seq_add(tcp_seq, seq_len)
+                    if (not manual_seq or not self.to_server_sent or 'S' in flags
+                            or seq_after(seq_end, self.to_server_seq)):
+                        self.to_server_seq = seq_end
+                    self.to_server_sent = True
                     tcp_seq = self.to_client_seq
                     tcp_ack = self.to_server_seq
 
@@ -897,7 +930,7 @@ def run(sFile):
     BUILD_STATUS['compiler']['packets'] = -1
 
     #seed the random values for this build; no seed means OS-supplied randomness
-    RNG.seed(ARGS.seed)
+    RNG.seed(getattr(ARGS, 'seed', None))
     HOST_MACS.clear()
 
     #load the syn file
@@ -991,10 +1024,10 @@ def render_timeline():
         #have the flow render the pkt, and add it to our global output queue
         pkts = flow.render(eventid)
         for pkt in pkts:
-            if ARGS.start_time is not None:
+            if getattr(ARGS, 'start_time', None) is not None:
                 #fixed timestamps instead of the wall clock, for reproducible output
                 pkt.time = ARGS.start_time + len(COMPILER_OUTPUT) * SEEDED_TIME_STEP
-            elif ARGS.seed is not None:
+            elif getattr(ARGS, 'seed', None) is not None:
                 pkt.time = SEEDED_START_TIME + len(COMPILER_OUTPUT) * SEEDED_TIME_STEP
             COMPILER_OUTPUT.append(pkt)
 

@@ -41,7 +41,7 @@ Usage:
 
 By default, values Flowsynth picks itself (default MAC addresses, TCP initial sequence numbers, `any` ports) are random, and packet timestamps are the time of the build. Passing `--seed N` (or `seed=N` to `Model`) seeds those random values and also replaces the wall-clock timestamps with fixed ones: the first packet is stamped 2000-01-01 00:00:00 UTC and each following packet 1 ms later. The same input file and seed then produce a byte-for-byte identical pcap (for a given Flowsynth, Scapy and Python version).
 
-To start somewhere other than 2000-01-01, add `--start-time` (or `start_time=` to `Model`) with epoch seconds or an ISO-8601 date/time, e.g. `--seed 7 --start-time 2026-11-14T10:00:00Z`. A time without an offset is taken as UTC; `Model` also accepts a `datetime`. `--start-time` can be used without `--seed` too, in which case the timestamps are fixed but the random values are not.
+To start somewhere other than 2000-01-01, add `--start-time` (or `start_time=` to `Model`) with epoch seconds or an ISO-8601 date/time, e.g. `--seed 7 --start-time 2026-11-14T10:00:00Z`. A time without an offset is taken as UTC; `Model` also accepts a `datetime`. It must fall between 1970 and 2106, the range a pcap timestamp can hold. `--start-time` can be used without `--seed` too, in which case the timestamps are fixed but the random values are not.
 
 Host names in flow declarations are resolved at build time and can resolve to different addresses from one build to the next; use IP addresses for reproducible output.
 
@@ -158,16 +158,16 @@ usage:
 `(tcp.initialize; );`
 
 ##### src_mac #####
-The *src_mac* attribute explicitly sets the MAC address for packets from the flow source. If no MAC is supplied, a random unicast, locally administered MAC is chosen for the source host and used for every packet to or from that host, across all flows in the synfile.
+The *src_mac* attribute explicitly sets the MAC address for packets from the flow source. A MAC set this way also becomes the source host's default for flows declared after this one. If no MAC is supplied, the host's default is used: a MAC set explicitly for that host by an earlier flow, otherwise a random unicast, locally administered MAC chosen once for the host and reused across all flows in the synfile.
 
 usage:
-`(tcp.initialize; src_mac: 37:16:3a:4e:6a:12; );`
+`(tcp.initialize; src_mac: 36:16:3a:4e:6a:12; );`
 
 ##### dst_mac #####
-The *dst_mac* attribute explicitly sets the MAC address for packets from the flow destination. If no MAC is supplied, a random unicast, locally administered MAC is chosen for the destination host and used for every packet to or from that host, across all flows in the synfile.
+The *dst_mac* attribute explicitly sets the MAC address for packets from the flow destination. A MAC set this way also becomes the destination host's default for flows declared after this one. If no MAC is supplied, the host's default is used: a MAC set explicitly for that host by an earlier flow, otherwise a random unicast, locally administered MAC chosen once for the host and reused across all flows in the synfile.
 
 usage:
-`(tcp.initialize; dst_mac: 37:16:3a:4e:6a:13; );`
+`(tcp.initialize; dst_mac: 36:16:3a:4e:6a:13; );`
 
 
 ### Events ###
@@ -218,14 +218,23 @@ Example:
     default > ( content: "HTTP/1.1 200 OK\x0d\x0a\x0d\x0a"; filecontent: "index.html"; );
 
 ##### tcp.seq Attribute #####
-The *tcp.seq* attribute lets you set the sequence number for the event's packet. The flow continues from the value given: if the content is split into several segments, they follow on from it, the other side's ACK acknowledges it, and later packets from the same side continue after it. To return to the earlier sequence, set *tcp.seq* again on a later event.
+The *tcp.seq* attribute lets you set the sequence number for the event's packet. If the content is split into several segments, they follow on from it. Values wrap at 2^32.
+
+Whether the flow moves depends on where the value falls:
+
+- On a side's first packet, on a SYN, or when the packet ends past what that side has sent so far, the flow continues from it: the other side's ACK acknowledges it, and later packets from the same side follow on.
+- When the packet falls within data already sent (a retransmission or an overlapping segment), the flow stays where it was: the other side repeats its current ACK, and later packets continue from the end of the stream.
 
 Example:
 
     default > (content:"abc"; tcp.seq: 1000;);
     default > (content:"de";);
+    default > (content:"AB"; tcp.seq: 1000;);
+    default > (content:"f";);
 
-The first packet has sequence number 1000, the server acknowledges 1003, and the second packet has sequence number 1003.
+The first packet has sequence number 1000, the server acknowledges 1003, and the second packet has sequence number 1003. The third packet resends bytes 1000-1001 with different content; the server acknowledges 1005 again, and the fourth packet has sequence number 1005.
+
+A flow's initial sequence numbers are random, with or without *tcp.initialize*. An absolute *tcp.seq* value only means something relative to a sequence you set yourself, so set *tcp.seq* on each side's first packet, or write the handshake yourself with *tcp.flags.syn*, *tcp.flags.synack* and *tcp.flags.ack* events instead of using *tcp.initialize*.
 
 ##### tcp.ack Attribute #####
 The *tcp.ack* attribute lets you set the acknowledgement number for the event's packet. It only affects that packet; the flow's sequence tracking is unchanged.

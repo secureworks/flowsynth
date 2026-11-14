@@ -2,6 +2,7 @@
 
 run with: python -m unittest discover tests  (or: python -m pytest tests)
 """
+import argparse
 import os
 import shutil
 import subprocess
@@ -14,7 +15,7 @@ SRC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src')
 sys.path.insert(0, SRC_DIR)
 
 import flowsynth  # noqa: E402
-from scapy.all import Ether, IP, TCP, UDP, rdpcap  # noqa: E402
+from scapy.all import Ether, IP, IPv6, TCP, UDP, rdpcap  # noqa: E402
 
 CLIENT = '10.0.0.5'
 SERVER = '192.168.1.10'
@@ -82,6 +83,18 @@ class TestMacs(FlowsynthTestCase):
         pkts = rdpcap(self.build(synth))
         self.assertEqual((pkts[0][Ether].src, pkts[0][Ether].dst), ('00:11:22:33:44:55', '00:aa:bb:cc:dd:ee'))
         self.assertEqual((pkts[1][Ether].src, pkts[1][Ether].dst), ('00:aa:bb:cc:dd:ee', '00:11:22:33:44:55'))
+
+    def test_explicit_mac_becomes_host_default(self):
+        synth = ('flow a tcp 10.0.0.1:1234 > 10.0.0.2:80 (src_mac: 00:11:22:33:44:55;);\n'
+                 'a > (content:"x";);\n'
+                 'flow b udp 10.0.0.1:5353 > 10.0.0.3:53;\n'
+                 'b > (content:"y";);\n')
+        macs = set()
+        for pkt in rdpcap(self.build(synth)):
+            for addr, mac in ((pkt[IP].src, pkt[Ether].src), (pkt[IP].dst, pkt[Ether].dst)):
+                if addr == '10.0.0.1':
+                    macs.add(mac)
+        self.assertEqual(macs, {'00:11:22:33:44:55'})
 
     def test_invalid_mac_rejected(self):
         flowdecl = {'name': 'f', 'l3_proto': flowsynth.Flow.PROTO_IPV4, 'l4_proto': flowsynth.Flow.PROTO_TCP,
@@ -190,26 +203,81 @@ class TestTcpSequence(FlowsynthTestCase):
         self.assertEqual([str(p.flags) for p in tcp_pkts], ['S', 'SA', 'A', 'PA', 'A'])
         self.assert_seq_ack_consistent(tcp_pkts)
 
-    def test_manual_seq_moves_the_flow(self):
-        synth = ('flow f tcp 10.0.0.1:1234 > 10.0.0.2:80 (tcp.initialize;);\n'
+    # a hand-written handshake with known ISNs: the client's data starts at 1000
+    HANDSHAKE = ('f > (tcp.flags.syn; tcp.seq: 999; tcp.noack;);\n'
+                 'f < (tcp.flags.synack; tcp.seq: 4999; tcp.noack;);\n'
+                 'f > (tcp.flags.ack; tcp.noack;);\n')
+
+    def flow(self, mss=None):
+        attrs = ' (mss: %d;)' % mss if mss else ''
+        return 'flow f tcp 10.0.0.1:1234 > 10.0.0.2:80%s;\n' % attrs + self.HANDSHAKE
+
+    def test_manual_seq_starts_the_stream(self):
+        # with no handshake, a manual seq on a side's first packet sets its stream
+        synth = ('flow f tcp 10.0.0.1:1234 > 10.0.0.2:80;\n'
                  'f > (content:"abc"; tcp.seq: 1000;);\n'
-                 'f > (content:"de";);\n'
-                 'f < (content:"ok";);\n')
+                 'f > (content:"de";);\n')
+        data, data_ack, follow, follow_ack = self.tcp_packets(self.build(synth))
+        self.assertEqual((data.seq, data_ack.ack, follow.seq, follow_ack.ack), (1000, 1003, 1003, 1005))
+
+    def test_manual_seq_ahead_moves_the_flow(self):
+        synth = self.flow() + ('f > (content:"abc"; tcp.seq: 2000;);\n'
+                               'f > (content:"de";);\n'
+                               'f < (content:"ok";);\n')
         tcp_pkts = self.tcp_packets(self.build(synth))
         manual, manual_ack, follow, follow_ack, resp, resp_ack = tcp_pkts[3:]
-        self.assertEqual(manual.seq, 1000)
-        self.assertEqual(manual_ack.ack, 1003)
-        self.assertEqual(follow.seq, 1003)
-        self.assertEqual(follow_ack.ack, 1005)
-        self.assertEqual(resp.ack, 1005)
-        self.assertEqual(resp_ack.seq, 1005)
+        self.assertEqual(manual.seq, 2000)
+        self.assertEqual(manual_ack.ack, 2003)
+        self.assertEqual(follow.seq, 2003)
+        self.assertEqual(follow_ack.ack, 2005)
+        self.assertEqual((resp.seq, resp.ack), (5000, 2005))
+        self.assertEqual((resp_ack.seq, resp_ack.ack), (2005, 5002))
+
+    def test_retransmission_leaves_the_flow(self):
+        # resending earlier bytes must not rewind the stream or the peer's ACK
+        synth = self.flow() + ('f > (content:"abc";);\n'
+                               'f > (content:"def";);\n'
+                               'f > (content:"ABC"; tcp.seq: 1000;);\n'
+                               'f > (content:"ghi";);\n')
+        tcp_pkts = self.tcp_packets(self.build(synth))[3:]
+        data = [(p.seq, bytes(p.payload)) for p in tcp_pkts[0::2]]
+        self.assertEqual(data, [(1000, b'abc'), (1003, b'def'), (1000, b'ABC'), (1006, b'ghi')])
+        self.assertEqual([p.ack for p in tcp_pkts[1::2]], [1003, 1006, 1006, 1009])
+
+    def test_overlap_past_the_stream_end(self):
+        # a resent segment that runs past the end moves the stream to its end
+        synth = self.flow(mss=4) + ('f > (content:"abcdefgh";);\n'
+                                    'f > (content:"ABCDEFGHIJ"; tcp.seq: 1000;);\n'
+                                    'f > (content:"x";);\n')
+        tcp_pkts = self.tcp_packets(self.build(synth))[3:]
+        self.assertEqual([p.seq for p in tcp_pkts[0::2]], [1000, 1004, 1000, 1004, 1008, 1010])
+        self.assertEqual([p.ack for p in tcp_pkts[1::2]], [1004, 1008, 1008, 1008, 1010, 1011])
 
     def test_manual_seq_segmented(self):
-        synth = ('flow f tcp 10.0.0.1:1234 > 10.0.0.2:80 (tcp.initialize; mss: 4;);\n'
-                 'f > (content:"abcdefghij"; tcp.seq: 5000;);\n')
+        synth = self.flow(mss=4) + 'f > (content:"abcdefghij"; tcp.seq: 5000;);\n'
         tcp_pkts = self.tcp_packets(self.build(synth))[3:]
         self.assertEqual([p.seq for p in tcp_pkts[0::2]], [5000, 5004, 5008])
         self.assertEqual([p.ack for p in tcp_pkts[1::2]], [5004, 5008, 5010])
+
+    def test_manual_seq_ack_wrap(self):
+        synth = ('flow f tcp 10.0.0.1:1234 > 10.0.0.2:80;\n'
+                 'f > (content:"a"; tcp.seq: 4294967301; tcp.ack: 4294967297;);\n')
+        data = self.tcp_packets(self.build(synth))[0]
+        self.assertEqual((data.seq, data.ack), (5, 1))
+
+    def test_rst_has_no_ack(self):
+        synth = self.flow() + 'f < (tcp.flags.rst;);\n'
+        tcp_pkts = self.tcp_packets(self.build(synth))
+        self.assertEqual(len(tcp_pkts), 4)
+        self.assertEqual((str(tcp_pkts[-1].flags), tcp_pkts[-1].seq, tcp_pkts[-1].ack), ('R', 5000, 0))
+
+    def test_ipv6(self):
+        synth = ('flow f tcp [2001:db8::1]:1234 > [2001:db8::2]:80 (tcp.initialize;);\n'
+                 'f > (content:"abc";);\n'
+                 'f < (content:"de";);\n')
+        pkts = rdpcap(self.build(synth))
+        self.assertTrue(all(IPv6 in p for p in pkts))
+        self.assert_seq_ack_consistent([p[TCP] for p in pkts])
 
     def test_manual_ack_only_affects_its_packet(self):
         synth = ('flow f tcp 10.0.0.1:1234 > 10.0.0.2:80 (tcp.initialize;);\n'
@@ -255,6 +323,14 @@ class TestPorts(FlowsynthTestCase):
         self.assertTrue(1024 <= sport <= 65000)
         # the same port for the life of the flow
         self.assertEqual(pkts[1][UDP].dport, sport)
+
+    def test_any_port_tcp(self):
+        synth = 'flow f tcp 10.0.0.1:any > 10.0.0.2:80 (tcp.initialize;);\nf > (content:"x";);\n'
+        pkts = rdpcap(self.build(synth))
+        sport = pkts[0][TCP].sport
+        self.assertTrue(1024 <= sport <= 65000)
+        self.assertEqual(set(p[TCP].sport for p in pkts if p[IP].src == '10.0.0.1'), {sport})
+        self.assertEqual(set(p[TCP].dport for p in pkts if p[IP].src == '10.0.0.2'), {sport})
 
     def test_any_port_seeded(self):
         ports = set(rdpcap(self.build(self.SYNTH_ANY, seed=7, name=n))[0][UDP].sport for n in 'ab')
@@ -317,7 +393,8 @@ class TestStartTime(FlowsynthTestCase):
         self.assertEqual(parse('2026-11-14T10:00:00-0130'), 1794650400 + 5400)
         self.assertEqual(parse(datetime.datetime(2026, 11, 14, 10)), 1794650400)
         self.assertEqual(parse(1794650400), 1794650400)
-        for bad in ('yesterday', '2026-13-01', '2026-11-14T25:00'):
+        for bad in ('yesterday', '2026-13-01', '2026-11-14T25:00', 'nan', 'inf', '-5', '1960-01-01',
+                    '2106-02-08', 2**32, -1, float('nan'), True):
             self.assertRaises(ValueError, parse, bad)
 
     def test_start_time_with_seed(self):
@@ -370,6 +447,21 @@ class TestBuildState(FlowsynthTestCase):
         # each flow holds only its own events
         self.assertEqual(len(flowsynth.COMPILER_FLOWS['web'].timeline), 6)
         self.assertEqual(len(flowsynth.COMPILER_FLOWS['dns'].timeline), 2)
+
+    def test_run_without_seed_or_start_time(self):
+        # callers that build their own ARGS, without the 1.5 fields, still work
+        synth_path = os.path.join(self.tmpdir, 'old.synth')
+        pcap_path = os.path.join(self.tmpdir, 'old.pcap')
+        with open(synth_path, 'w') as fptr:
+            fptr.write(SYNTH)
+        saved = flowsynth.ARGS
+        flowsynth.ARGS = argparse.Namespace(input=synth_path, output_format='pcap', output_file=pcap_path,
+                                            quiet=True, debug=False, display='text', no_filecontent=False)
+        try:
+            flowsynth.run(synth_path)
+        finally:
+            flowsynth.ARGS = saved
+        self.assertEqual(len(rdpcap(pcap_path)), 10)
 
     def test_redeclared_flow(self):
         synth = ('flow f udp 10.0.0.1:1111 > 10.0.0.2:53;\n'
