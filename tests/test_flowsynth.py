@@ -364,6 +364,7 @@ class TestTcpSequence(FlowsynthTestCase):
         for flow_attrs, event_attrs, error in (
                 ('src_mac;', '', 'src_mac needs a value'), ('dst_mac;', '', 'dst_mac needs a value'),
                 ('mss;', '', 'mss needs a value'), ('tcp.client_isn;', '', 'tcp.client_isn needs a value'),
+                ('tcp.server_isn;', '', 'tcp.server_isn needs a value'),
                 ('', 'tcp.seq;', 'tcp.seq needs a value'), ('', 'tcp.ack;', 'tcp.ack needs a value'),
                 ('', 'tcp.seq: abc;', 'tcp.seq (abc) must be an integer'),
                 ('', 'tcp.ack: 1x;', 'tcp.ack (1x) must be an integer')):
@@ -377,10 +378,28 @@ class TestTcpSequence(FlowsynthTestCase):
         for synth, error in (('flow f tcp 10.0.0.1:1 > 10.0.0.2:2 (mss: 1460\n', 'Unterminated attribute list'),
                              ('flow f tcp 10.0.0.1:1 > 10.0.0.2:2;\nf > (content:"a"\n', 'Unterminated attribute list'),
                              ('<!DOCTYPE html>\n<html lang="en">\n', 'Unexpected flow directionality'),
-                             ('flow f tcp 10.0.0.1:1 > 10.0.0.2:2;\nf >\n', 'Unexpected end of input')):
+                             ('flow f tcp 10.0.0.1:1 > 10.0.0.2:2;\nf >\n', 'Unexpected end of input'),
+                             # a missing ';' after ')' used to swallow the next declaration
+                             ('flow f tcp 10.0.0.1:1 > 10.0.0.2:2;\nf > (content:"a")\n'
+                              'f > (content:"b"; tcp.flags.fin;);\n', "Expected ';' after ')'"),
+                             ('flow f tcp 10.0.0.1:1 > 10.0.0.2:2 (tcp.initialize)\n'
+                              'f > (content:"a";);\n', "Expected ';' after ')'"),
+                             ('flow f tcp 10.0.0.1:1 > 10.0.0.2:2;\nf > (content;);\n', 'content needs a value'),
+                             ('flow f tcp 10.0.0.1:1 > 10.0.0.2:2;\nf > (filecontent;);\n',
+                              'filecontent needs a value')):
             with self.assertLogs(level='CRITICAL') as logs, self.assertRaises(SystemExit):
                 self.build(synth)
             self.assertIn(error, '\n'.join(logs.output))
+
+    def test_attribute_list_without_inner_semicolon(self):
+        # '(tcp.initialize);' and '(content:"a");' end the list at ')'
+        synth = ('flow f tcp 10.0.0.1:1 > 10.0.0.2:2 (tcp.initialize);\n'
+                 'f > (content:"a");\n'
+                 'f > (content:"b"; tcp.flags.fin);\n')
+        tcp_pkts = self.tcp_packets(self.build(synth))
+        self.assertEqual([str(p.flags) for p in tcp_pkts[:3]], ['S', 'SA', 'A'])
+        self.assertEqual([bytes(p.payload) for p in tcp_pkts[3::2]], [b'a', b'b'])
+        self.assertEqual(str(tcp_pkts[-2].flags), 'FPA')
 
     def test_fin_with_manual_seq(self):
         synth = self.flow() + ('f > (content:"abc";);\n'

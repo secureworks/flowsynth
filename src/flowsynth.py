@@ -343,8 +343,10 @@ class FSLexer:
             while tokens[0] != ";":
                 token = tokens[0]
                 if (token == ")"):
-                    #end of attribute spec. jump forward two (should always be ');')
+                    #end of attribute spec, which must be followed by ';'
                     tokens = tokens[1:]
+                    if not tokens or tokens[0] != ";":
+                        parser_bailout("Invalid Syntax. Expected ';' after ')'.")
                     break
                 modifier_key = ""
                 tok_ctr = 0
@@ -355,6 +357,11 @@ class FSLexer:
                         break
                     elif (token == ";"):
                         tokens = tokens[tok_ctr+1:]
+                        single_modifier = True
+                        break
+                    elif (token == ")"):
+                        #a bare attribute that ends the list; leave the ')' for the loop
+                        tokens = tokens[tok_ctr:]
                         single_modifier = True
                         break
                     else:
@@ -368,8 +375,12 @@ class FSLexer:
                     modifier_value = ""
                     tok_ctr = 0
                     for token in tokens:
-                        if (token == ';' or token == ")"):
+                        if (token == ';'):
                             tokens = tokens[tok_ctr+1:]
+                            break
+                        elif (token == ")"):
+                            #the value ends the list; leave the ')' for the loop
+                            tokens = tokens[tok_ctr:]
                             break
                         else:
                             modifier_value = "%s%s" % (modifier_value, token)
@@ -420,8 +431,10 @@ class FSLexer:
             while tokens[0] != ";":
                 token = tokens[0]
                 if (token == ")"):
-                    #end of attribute spec. jump forward two (should always be ');')
+                    #end of attribute spec, which must be followed by ';'
                     tokens = tokens[1:]
+                    if not tokens or tokens[0] != ";":
+                        parser_bailout("Invalid Syntax. Expected ';' after ')'.")
                     break
                 modifier_key = ""
                 tok_ctr = 0
@@ -432,6 +445,11 @@ class FSLexer:
                         break
                     elif (token == ";"):
                         tokens = tokens[tok_ctr+1:]
+                        single_modifier = True
+                        break
+                    elif (token == ")"):
+                        #a bare attribute that ends the list; leave the ')' for the loop
+                        tokens = tokens[tok_ctr:]
                         single_modifier = True
                         break
                     else:
@@ -445,8 +463,12 @@ class FSLexer:
                     modifier_value = ""
                     tok_ctr = 0
                     for token in tokens:
-                        if (token == ';' or token == ")"):
+                        if (token == ';'):
                             tokens = tokens[tok_ctr+1:]
+                            break
+                        elif (token == ")"):
+                            #the value ends the list; leave the ')' for the loop
+                            tokens = tokens[tok_ctr:]
                             break
                         else:
                             modifier_value = "%s%s" % (modifier_value, token)
@@ -456,6 +478,9 @@ class FSLexer:
                 else:
                     modifier_value = True
 
+                if (modifier_key.lower() in ('content', 'filecontent', 'uricontent')
+                        and modifier_value is True):
+                    parser_bailout("%s needs a value." % modifier_key)
                 if (modifier_key.lower() == 'content'):
                     #content
                     eventdecl['contents'].append({'type': 'bytes', 'value': modifier_value})
