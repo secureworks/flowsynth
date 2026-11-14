@@ -216,6 +216,8 @@ The *tcp.ack* attribute lets you set the acknowledgement number for the event's 
 ##### tcp.noack Attribute #####
 The *tcp.noack* attribute tells Flowsynth to not generate an ACK for this event.
 
+Flowsynth generates an ACK from the other side only for packets that carry data. Packets without payload, such as a bare `tcp.flags.ack` event, get no automatic ACK. (Before version 1.5.0 they did, so synths with such events now produce fewer packets.)
+
 ##### tcp.flags.syn Attribute #####
 The *tcp.flags.syn* attribute tells Flowsynth to force the packet to be a SYN packet.
 

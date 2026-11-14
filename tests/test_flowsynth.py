@@ -113,9 +113,9 @@ class TestTcpSequence(FlowsynthTestCase):
         self.assertEqual(syn.ack, 0)
         self.assertEqual(synack.ack, (syn.seq + 1) % 2**32)
         self.assertEqual((ack.seq, ack.ack), ((syn.seq + 1) % 2**32, (synack.seq + 1) % 2**32))
-        next_seq = {80: ack.ack, 44123: ack.seq}       # keyed by sending port
+        next_seq = {syn.dport: ack.ack, syn.sport: ack.seq}     # keyed by sending port
         for pkt in tcp_pkts[3:]:
-            peer = 44123 if pkt.sport == 80 else 80
+            peer = pkt.dport
             self.assertEqual(pkt.seq, next_seq[pkt.sport], "bad seq: %r" % pkt)
             self.assertEqual(pkt.ack, next_seq[peer], "bad ack: %r" % pkt)
             next_seq[pkt.sport] = (pkt.seq + len(pkt.payload)) % 2**32
@@ -124,6 +124,17 @@ class TestTcpSequence(FlowsynthTestCase):
         tcp_pkts = self.tcp_packets(self.build())
         # handshake, request + ACK, response + ACK, bare ACK
         self.assertEqual(len(tcp_pkts), 8)
+        self.assert_seq_ack_consistent(tcp_pkts)
+
+    def test_no_ack_for_bare_packets(self):
+        synth = ('flow f tcp 10.0.0.1:1234 > 10.0.0.2:80 (tcp.initialize;);\n'
+                 'f > (content:"x";);\n'
+                 'f > (tcp.flags.ack;);\n'
+                 'f < (tcp.flags.ack;);\n')
+        tcp_pkts = self.tcp_packets(self.build(synth))
+        # handshake, data + ACK, then the two bare ACKs with no reply
+        self.assertEqual([str(p.flags) for p in tcp_pkts], ['S', 'SA', 'A', 'PA', 'A', 'A', 'A'])
+        self.assertEqual([p.sport for p in tcp_pkts[-2:]], [1234, 80])
         self.assert_seq_ack_consistent(tcp_pkts)
 
     def test_seq_wraps_at_32_bits(self):

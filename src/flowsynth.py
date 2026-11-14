@@ -743,7 +743,8 @@ class Flow:
                     self.to_server_ack = seq_add(self.to_server_seq, payload_size)
                     self.to_server_seq = self.to_server_ack
 
-                if 'tcp.noack' not in event['attributes']:
+                #a real stack doesn't acknowledge a segment that carries no data
+                if 'tcp.noack' not in event['attributes'] and payload_size > 0:
                     logging.debug('INFERRED ACK: S:%s A:%s', tcp_seq, tcp_ack)
                     lyr_eth = Ether(src = dst_mac, dst=src_mac)
                     if self.l3_proto == Flow.PROTO_IPV4:
