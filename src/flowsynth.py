@@ -35,7 +35,7 @@ from io import open
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 logging.getLogger("scapy.interactive").setLevel(logging.ERROR)
 logging.getLogger("scapy.loading").setLevel(logging.ERROR)
-from scapy.all import Ether, IP, IPv6, TCP, UDP, RandMAC, hexdump, wrpcap, Raw
+from scapy.all import Ether, IP, IPv6, TCP, UDP, hexdump, wrpcap, Raw
 
 #global variables
 APP_VERSION_STRING = "1.4.1"
@@ -55,6 +55,28 @@ END_TIME = 0
 
 #for recording the build status
 BUILD_STATUS = {}
+
+#randomness (MACs, ISNs, 'any' ports). seeded per build; see run()
+RNG = random.Random()
+HOST_MACS = {}                  # one default MAC per host, shared across flows
+
+#packet timestamps used when a seed is given, so output is byte-for-byte reproducible
+SEEDED_START_TIME = 946684800   # 2000-01-01 00:00:00 UTC
+SEEDED_TIME_STEP = 0.001        # seconds between consecutive packets
+
+def seq_add(seq, n):
+    """add n to a TCP sequence number, wrapping at 2**32"""
+    return (seq + n) % 4294967296
+
+def host_mac(host):
+    """return the default MAC for a host: random, unicast and locally administered,
+    picked once per host and reused for every packet and flow involving it"""
+    if host not in HOST_MACS:
+        octets = [RNG.getrandbits(8) for _ in range(6)]
+        # clear the group (multicast) bit, set the locally administered bit
+        octets[0] = (octets[0] & 0xfc) | 0x02
+        HOST_MACS[host] = ':'.join('%02x' % octet for octet in octets)
+    return HOST_MACS[host]
 
 class SynSyntaxError(Exception):
     """ an exception for a syntax error when parsing a synfile """
@@ -415,18 +437,17 @@ class Flow:
             self.l3_proto = flowdecl['l3_proto']
             self.l4_proto = flowdecl['l4_proto']
             self.src_host = flowdecl['src_host']
-            self.src_port = flowdecl['src_port']
+            self.src_port = Flow.format_port(flowdecl['src_port'])
             self.flow = flowdecl['flow']
             self.dst_host = flowdecl['dst_host']
-            self.dst_port = flowdecl['dst_port']
+            self.dst_port = Flow.format_port(flowdecl['dst_port'])
         except KeyError:
             parser_bailout("Invalid flowdecl passed to Flow.init")
 
-        self.src_mac = RandMAC()
-        self.dst_mac = RandMAC()
-
-        #set a user-supplied source and destination mac, if provided
-        if 'src_mac' in flowdecl['attributes']:
+        #use a user-supplied source and destination mac if provided, else the host default
+        if 'src_mac' not in flowdecl['attributes']:
+            self.src_mac = host_mac(self.src_host)
+        else:
             logging.debug("Using user-supplied source mac")
             smac = flowdecl['attributes']['src_mac'].lower()
             if self._valid_mac(smac):
@@ -434,7 +455,9 @@ class Flow:
             else:
                 parser_bailout("A src_mac ({}) was explicitly set, but it doesn't appear to be valid.".format(smac))
 
-        if 'dst_mac' in flowdecl['attributes']:
+        if 'dst_mac' not in flowdecl['attributes']:
+            self.dst_mac = host_mac(self.dst_host)
+        else:
             logging.debug("Using user-supplied dest mac")
             dmac = flowdecl['attributes']['dst_mac'].lower()
             if self._valid_mac(dmac):
@@ -443,8 +466,9 @@ class Flow:
                 parser_bailout("A dst_mac ({}) was explicitly set, but it doesn't appear to be valid.".format(dmac))
 
 
-        self.to_server_seq = random.randint(10000, 99999)
-        self.to_client_seq = random.randint(10000, 99999)
+        #initial sequence numbers; tcp.initialize uses these as the ISNs
+        self.to_server_seq = RNG.getrandbits(32)
+        self.to_client_seq = RNG.getrandbits(32)
         self.to_server_ack = 0
         self.to_client_ack = 0
         self.tcp_server_bytes = 0
@@ -456,7 +480,7 @@ class Flow:
             self.tcp_mss = 1460
 
     def _valid_mac(self, mac):
-        mac_re = r'[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}'
+        mac_re = r'[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}$'
         valid_mac = re.match(mac_re, mac)
         if valid_mac != None:
             return True
@@ -549,13 +573,14 @@ class Flow:
             raise SynCompileError("File not found -- %s" % filepath)
             sys.exit(-1)
 
+    @staticmethod
     def format_port(port):
         """format a port specifier"""
         if type(port) == int:
             return int(port)
         elif type(port) == str and port.upper() == 'ANY':
             #return a random port between 1024 and 65k
-            return random.randint(1024, 65000)
+            return RNG.randint(1024, 65000)
         elif type(port) == str:
             try:
                 port = int(port)
@@ -605,14 +630,9 @@ class Flow:
                 #use the clients seq/ack
                 self.tcp_server_bytes = self.tcp_server_bytes + len(payload)
                 tcp_seq = self.to_server_seq
-                tcp_ack = self.to_server_ack
+                tcp_ack = self.to_client_seq
                 logging.debug("*** Flow %s --> S:%s A:%s B:%s", self.name, tcp_seq, tcp_ack, self.tcp_server_bytes)
                 logging.debug("*** %s", self.timeline[eventid])
-
-                #nooooooooooo
-                if (len(payload) > 0):
-                    #set tcp ack to last ack
-                    tcp_ack = self.to_client_seq
 
             else:
                 #reverse src/dst
@@ -626,12 +646,9 @@ class Flow:
                 #use the servers seq/ack
                 self.tcp_client_bytes = self.tcp_client_bytes + len(payload)
                 tcp_seq = self.to_client_seq
-                tcp_ack = self.to_client_ack
+                tcp_ack = self.to_server_seq
                 logging.debug("*** Flow %s <-- S:%s A:%s B:%s", self.name, tcp_seq, tcp_ack, self.tcp_client_bytes)
                 logging.debug("*** %s", self.timeline[eventid])
-
-                if (len(payload) > 0):
-                    tcp_ack = self.to_server_seq
 
             pkt = None
             logging.debug("SRC host: %s", src_host)
@@ -680,9 +697,14 @@ class Flow:
                 else:
                     flags = 'PA'
 
-                logging.debug('Data packet with inferred flags S:%s A:%s', tcp_seq, tcp_ack)
+                #the ack field is only meaningful with the ACK flag set; leave it zero otherwise
+                pkt_ack = tcp_ack
+                if 'A' not in flags and 'tcp.ack' not in event['attributes']:
+                    pkt_ack = 0
+
+                logging.debug('Data packet with inferred flags S:%s A:%s', tcp_seq, pkt_ack)
                 # the 'payload' variable is a bytearray so make sure we pass it to scapy with Raw().
-                lyr_tcp = TCP(flags=flags, seq=tcp_seq, ack=tcp_ack, sport = src_port, dport = dst_port) / Raw(payload)
+                lyr_tcp = TCP(flags=flags, seq=tcp_seq, ack=pkt_ack, sport = src_port, dport = dst_port) / Raw(payload)
                 pkt = lyr_eth / lyr_ip / lyr_tcp
                 pkts.append(pkt)
 
@@ -702,22 +724,21 @@ class Flow:
                     logging.debug("len payload %s" % len(payload))
 
                     tcp_seq = tcp_ack
-                    tcp_ack = self.to_client_seq + len(payload)
+                    tcp_ack = seq_add(self.to_client_seq, len(payload))
 
-                    self.to_client_ack = self.to_client_seq + len(payload)
+                    self.to_client_ack = seq_add(self.to_client_seq, len(payload))
                     self.to_client_seq = self.to_client_ack
 
                 else:
                     logging.debug('CLIENT requires ACK: Flow is TO_SERVER')
 
                     tmp_ack = self.to_server_seq
-                    tmp_seq = self.to_server_ack
 
                     tcp_seq = tcp_ack
-                    tcp_ack = tmp_ack + payload_size
+                    tcp_ack = seq_add(tmp_ack, payload_size)
 
 
-                    self.to_server_ack = self.to_server_seq + payload_size
+                    self.to_server_ack = seq_add(self.to_server_seq, payload_size)
                     self.to_server_seq = self.to_server_ack
 
                 if 'tcp.noack' not in event['attributes']:
@@ -757,6 +778,8 @@ def parse_cmd_line():
     parser.add_argument('-d', dest='debug', action='store_true', default=False, help='Run in debug mode')
     parser.add_argument('--display', dest='display', action='store', default='text', choices=['text','json'], help='Display format')
     parser.add_argument('--no-filecontent', dest='no_filecontent', action='store_true', default=False, help='Disable support for the filecontent attribute')
+    parser.add_argument('--seed', dest='seed', action='store', type=int, default=None,
+        help='Seed for random values (MACs, TCP ISNs, \'any\' ports). Also fixes packet\ntimestamps, so the same input and seed give an identical pcap.')
 
     args = parser.parse_args()
 
@@ -785,7 +808,7 @@ def main():
 class Model():
     """main class."""
 
-    def __init__(self, input, output_format="pcap", output_file="", quiet=False, debug=False, display="text", no_filecontent=False):
+    def __init__(self, input, output_format="pcap", output_file="", quiet=False, debug=False, display="text", no_filecontent=False, seed=None):
         """constructor"""
         global ARGS, LOGGING_LEVEL, COMPILER_FLOWS, COMPILER_OUTPUT, COMPILER_TIMELINE, START_TIME, END_TIME, BUILD_STATUS
 
@@ -809,6 +832,7 @@ class Model():
         ARGS.debug = debug
         ARGS.display = display
         ARGS.no_filecontent = no_filecontent
+        ARGS.seed = seed
 
         if (ARGS.debug == True):
             LOGGING_LEVEL = logging.DEBUG
@@ -836,6 +860,10 @@ def run(sFile):
     BUILD_STATUS['compiler']['instructions'] = -1
     BUILD_STATUS['compiler']['events'] = -1
     BUILD_STATUS['compiler']['packets'] = -1
+
+    #seed the random values for this build; no seed means OS-supplied randomness
+    RNG.seed(ARGS.seed)
+    HOST_MACS.clear()
 
     #load the syn file
     logging.debug("Entering file loading phase")
@@ -928,6 +956,9 @@ def render_timeline():
         #have the flow render the pkt, and add it to our global output queue
         pkts = COMPILER_FLOWS[flowname].render(eventid)
         for pkt in pkts:
+            if ARGS.seed is not None:
+                #fixed timestamps instead of the wall clock, for reproducible output
+                pkt.time = SEEDED_START_TIME + len(COMPILER_OUTPUT) * SEEDED_TIME_STEP
             COMPILER_OUTPUT.append(pkt)
 
 def process_instructions(instr):
@@ -971,8 +1002,9 @@ def autogen_handshake(flowdecl):
 
     parent_flow = COMPILER_FLOWS[flowdecl['name']]
 
-    client_isn = 10    #random.randint(10000, 99999)
-    server_isn = 100   #random.randint(10000, 99999)
+    #the flow's initial sequence numbers (random 32-bit values) are the ISNs
+    client_isn = parent_flow.to_server_seq
+    server_isn = parent_flow.to_client_seq
 
     #send syn
     eventdecl = {}
@@ -995,7 +1027,7 @@ def autogen_handshake(flowdecl):
     eventdecl['attributes']['tcp.flags.synack'] = True
     eventdecl['attributes']['tcp.noack'] = True
     eventdecl['attributes']['tcp.seq'] = server_isn
-    eventdecl['attributes']['tcp.ack'] = client_isn + 1
+    eventdecl['attributes']['tcp.ack'] = seq_add(client_isn, 1)
     add_event(flowdecl['name'], eventdecl)
 
     #send ack
@@ -1006,15 +1038,15 @@ def autogen_handshake(flowdecl):
     eventdecl['attributes'] = {}
     eventdecl['attributes']['tcp.flags.ack'] = True
     eventdecl['attributes']['tcp.noack'] = True
-    eventdecl['attributes']['tcp.ack'] = server_isn + 1
-    eventdecl['attributes']['tcp.seq'] = client_isn + 1
+    eventdecl['attributes']['tcp.ack'] = seq_add(server_isn, 1)
+    eventdecl['attributes']['tcp.seq'] = seq_add(client_isn, 1)
     add_event(flowdecl['name'], eventdecl)
 
     #dont set the parent flows SEQ/ACK until the end of this process
-    parent_flow.to_server_seq = client_isn + 1
-    parent_flow.to_client_seq = server_isn + 1
+    parent_flow.to_server_seq = seq_add(client_isn, 1)
+    parent_flow.to_client_seq = seq_add(server_isn, 1)
     parent_flow.to_server_ack = client_isn
-    parent_flow.to_client_ack = server_isn + 1
+    parent_flow.to_client_ack = seq_add(server_isn, 1)
 
 
 #has test case
