@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import datetime
 import tempfile
 import unittest
 
@@ -38,14 +39,14 @@ class FlowsynthTestCase(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmpdir)
 
-    def build(self, synth=SYNTH, seed=None, name='out'):
+    def build(self, synth=SYNTH, seed=None, name='out', start_time=None):
         """build a synth via the Model API; return the pcap path"""
         synth_path = os.path.join(self.tmpdir, name + '.synth')
         pcap_path = os.path.join(self.tmpdir, name + '.pcap')
         with open(synth_path, 'w') as fptr:
             fptr.write(synth)
         flowsynth.Model(input=synth_path, output_format='pcap', output_file=pcap_path,
-                        quiet=True, seed=seed).build()
+                        quiet=True, seed=seed, start_time=start_time).build()
         return pcap_path
 
     def read_bytes(self, path):
@@ -297,6 +298,55 @@ class TestSeed(FlowsynthTestCase):
                                      '--no-filecontent', '--seed', '99'])
             outputs.append(self.read_bytes(pcap_path))
         self.assertEqual(outputs[0], outputs[1])
+
+
+class TestStartTime(FlowsynthTestCase):
+
+    def first_times(self, path):
+        return [float(pkt.time) for pkt in rdpcap(path)][:2]
+
+    def test_parse_start_time(self):
+        parse = flowsynth.parse_start_time
+        self.assertEqual(parse('1700000000'), 1700000000)
+        self.assertEqual(parse('1700000000.5'), 1700000000.5)
+        self.assertEqual(parse('2026-11-14'), 1794614400)
+        self.assertEqual(parse('2026-11-14T10:00:00Z'), 1794650400)
+        self.assertEqual(parse('2026-11-14T10:00:00'), 1794650400)
+        self.assertEqual(parse('2026-11-14 10:00:00.25'), 1794650400.25)
+        self.assertEqual(parse('2026-11-14T10:00:00+02:00'), 1794650400 - 7200)
+        self.assertEqual(parse('2026-11-14T10:00:00-0130'), 1794650400 + 5400)
+        self.assertEqual(parse(datetime.datetime(2026, 11, 14, 10)), 1794650400)
+        self.assertEqual(parse(1794650400), 1794650400)
+        for bad in ('yesterday', '2026-13-01', '2026-11-14T25:00'):
+            self.assertRaises(ValueError, parse, bad)
+
+    def test_start_time_with_seed(self):
+        times = self.first_times(self.build(seed=1, start_time='2026-11-14T10:00:00Z'))
+        self.assertAlmostEqual(times[0], 1794650400)
+        self.assertAlmostEqual(times[1] - times[0], flowsynth.SEEDED_TIME_STEP, places=5)
+        first = self.read_bytes(self.build(seed=1, start_time='2026-11-14T10:00:00Z', name='a'))
+        second = self.read_bytes(self.build(seed=1, start_time=1794650400, name='b'))
+        self.assertEqual(first, second)
+
+    def test_start_time_without_seed(self):
+        times = self.first_times(self.build(start_time=1700000000))
+        self.assertAlmostEqual(times[0], 1700000000)
+
+    def test_default_seeded_start_time_unchanged(self):
+        self.assertAlmostEqual(self.first_times(self.build(seed=1))[0], 946684800)
+
+    def test_cli_start_time(self):
+        synth_path = os.path.join(self.tmpdir, 'cli.synth')
+        pcap_path = os.path.join(self.tmpdir, 'cli.pcap')
+        with open(synth_path, 'w') as fptr:
+            fptr.write(SYNTH)
+        cmd = [sys.executable, os.path.join(SRC_DIR, 'flowsynth.py'), synth_path, '-f', 'pcap', '-w', pcap_path, '-q']
+        subprocess.check_output(cmd + ['--seed', '1', '--start-time', '2026-11-14T10:00:00Z'])
+        self.assertAlmostEqual(self.first_times(pcap_path)[0], 1794650400)
+        proc = subprocess.Popen(cmd + ['--start-time', 'yesterday'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        _, err = proc.communicate()
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn(b'Invalid start time', err)
 
 
 class TestBuildState(FlowsynthTestCase):

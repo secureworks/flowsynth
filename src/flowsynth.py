@@ -21,6 +21,8 @@
 from __future__ import print_function
 
 import argparse
+import calendar
+import datetime
 import logging
 import re
 import random
@@ -60,9 +62,46 @@ BUILD_STATUS = {}
 RNG = random.Random()
 HOST_MACS = {}                  # one default MAC per host, shared across flows
 
-#packet timestamps used when a seed is given, so output is byte-for-byte reproducible
-SEEDED_START_TIME = 946684800   # 2000-01-01 00:00:00 UTC
+#packet timestamps used when a seed or start time is given, so output is byte-for-byte reproducible
+SEEDED_START_TIME = 946684800   # 2000-01-01 00:00:00 UTC; the default start time with a seed
 SEEDED_TIME_STEP = 0.001        # seconds between consecutive packets
+
+ISO_8601_RE = re.compile(r'^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(\.\d+)?)?)?\s*(Z|[+-]\d{2}:?\d{2})?$', re.IGNORECASE)
+
+def parse_start_time(value):
+    """return epoch seconds for a start time given as epoch seconds, an ISO-8601
+    date/time (UTC unless it has an offset), or a datetime (naive means UTC)"""
+    if value is None or isinstance(value, (int, float)):
+        return value
+    if isinstance(value, datetime.datetime):
+        if value.utcoffset() is not None:
+            value = value - value.utcoffset()
+        return calendar.timegm(value.timetuple()) + value.microsecond / 1000000.0
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    mo = ISO_8601_RE.match(value.strip())
+    if mo is None:
+        raise ValueError("Invalid start time '%s'; use epoch seconds or ISO-8601" % value)
+    year, month, day, hour, minute, second = [int(field or 0) for field in mo.group(1, 2, 3, 4, 5, 6)]
+    #datetime() validates the fields
+    start = calendar.timegm(datetime.datetime(year, month, day, hour, minute, second).timetuple())
+    if mo.group(7):
+        start = start + float(mo.group(7))
+    offset = mo.group(8)
+    if offset and offset.upper() != 'Z':
+        offset = offset.replace(':', '')
+        sign = -1 if offset[0] == '-' else 1
+        start = start - sign * (int(offset[1:3]) * 3600 + int(offset[3:5]) * 60)
+    return start
+
+def cli_start_time(value):
+    """argparse type for --start-time"""
+    try:
+        return parse_start_time(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e))
 
 def seq_add(seq, n):
     """add n to a TCP sequence number, wrapping at 2**32"""
@@ -766,6 +805,8 @@ def parse_cmd_line():
     parser.add_argument('--no-filecontent', dest='no_filecontent', action='store_true', default=False, help='Disable support for the filecontent attribute')
     parser.add_argument('--seed', dest='seed', action='store', type=int, default=None,
         help='Seed for random values (MACs, TCP ISNs, \'any\' ports). Also fixes packet\ntimestamps, so the same input and seed give an identical pcap.')
+    parser.add_argument('--start-time', dest='start_time', action='store', type=cli_start_time, default=None,
+        help='Timestamp of the first packet, as epoch seconds or ISO-8601 (UTC unless an\noffset is given); later packets follow at 1ms intervals. Default with --seed:\n2000-01-01T00:00:00Z. Without --seed or --start-time, timestamps are the build time.')
 
     args = parser.parse_args()
 
@@ -794,7 +835,7 @@ def main():
 class Model():
     """main class."""
 
-    def __init__(self, input, output_format="pcap", output_file="", quiet=False, debug=False, display="text", no_filecontent=False, seed=None):
+    def __init__(self, input, output_format="pcap", output_file="", quiet=False, debug=False, display="text", no_filecontent=False, seed=None, start_time=None):
         """constructor"""
         global ARGS, LOGGING_LEVEL, COMPILER_FLOWS, COMPILER_OUTPUT, COMPILER_TIMELINE, START_TIME, END_TIME, BUILD_STATUS
 
@@ -819,6 +860,7 @@ class Model():
         ARGS.display = display
         ARGS.no_filecontent = no_filecontent
         ARGS.seed = seed
+        ARGS.start_time = parse_start_time(start_time)
 
         if (ARGS.debug == True):
             LOGGING_LEVEL = logging.DEBUG
@@ -949,8 +991,10 @@ def render_timeline():
         #have the flow render the pkt, and add it to our global output queue
         pkts = flow.render(eventid)
         for pkt in pkts:
-            if ARGS.seed is not None:
+            if ARGS.start_time is not None:
                 #fixed timestamps instead of the wall clock, for reproducible output
+                pkt.time = ARGS.start_time + len(COMPILER_OUTPUT) * SEEDED_TIME_STEP
+            elif ARGS.seed is not None:
                 pkt.time = SEEDED_START_TIME + len(COMPILER_OUTPUT) * SEEDED_TIME_STEP
             COMPILER_OUTPUT.append(pkt)
 

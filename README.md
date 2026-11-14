@@ -15,7 +15,7 @@ Usage:
 
     usage: flowsynth.py [-h] [-f OUTPUT_FORMAT] [-w OUTPUT_FILE] [-q] [-d]
                         [--display {text,json}] [--no-filecontent]
-                        [--seed SEED]
+                        [--seed SEED] [--start-time START_TIME]
                         input
 
     positional arguments:
@@ -32,10 +32,18 @@ Usage:
       --no-filecontent      Disable support for the filecontent attribute
       --seed SEED           Seed for random values (MACs, TCP ISNs, 'any' ports). Also fixes packet
                             timestamps, so the same input and seed give an identical pcap.
+      --start-time START_TIME
+                            Timestamp of the first packet, as epoch seconds or ISO-8601 (UTC unless an
+                            offset is given); later packets follow at 1ms intervals. Default with --seed:
+                            2000-01-01T00:00:00Z. Without --seed or --start-time, timestamps are the build time.
 
 #### Reproducible output ####
 
 By default, values Flowsynth picks itself (default MAC addresses, TCP initial sequence numbers, `any` ports) are random, and packet timestamps are the time of the build. Passing `--seed N` (or `seed=N` to `Model`) seeds those random values and also replaces the wall-clock timestamps with fixed ones: the first packet is stamped 2000-01-01 00:00:00 UTC and each following packet 1 ms later. The same input file and seed then produce a byte-for-byte identical pcap (for a given Flowsynth, Scapy and Python version).
+
+To start somewhere other than 2000-01-01, add `--start-time` (or `start_time=` to `Model`) with epoch seconds or an ISO-8601 date/time, e.g. `--seed 7 --start-time 2026-11-14T10:00:00Z`. A time without an offset is taken as UTC; `Model` also accepts a `datetime`. `--start-time` can be used without `--seed` too, in which case the timestamps are fixed but the random values are not.
+
+Host names in flow declarations are resolved at build time and can resolve to different addresses from one build to the next; use IP addresses for reproducible output.
 
 ### Python Module ###
 
@@ -49,7 +57,7 @@ Example usage:
 The Model class function `build()` executes flowsynth and the class constructor takes the same arguments as the script (see above):
 
     class Model():
-        def __init__(self, input, output_format="pcap", output_file="", quiet=False, debug=False, display="text", no_filecontent=False, seed=None):
+        def __init__(self, input, output_format="pcap", output_file="", quiet=False, debug=False, display="text", no_filecontent=False, seed=None, start_time=None):
         ...
 
 *Note:* Because of the current less-than-ideal use of global variables instead of class variables, if more than one Model object is used concurrently, there will be issues. Hopefully this limitation will be remedied in a future release.
