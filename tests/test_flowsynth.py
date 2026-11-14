@@ -109,16 +109,19 @@ class TestTcpSequence(FlowsynthTestCase):
 
     def assert_seq_ack_consistent(self, tcp_pkts):
         """check every packet against the expected next seq of each side"""
-        syn, synack, ack = tcp_pkts[:3]
-        self.assertEqual(syn.ack, 0)
+        syn, synack = tcp_pkts[:2]
+        self.assertEqual((str(syn.flags), syn.ack), ('S', 0))
+        self.assertEqual(str(synack.flags), 'SA')
         self.assertEqual(synack.ack, (syn.seq + 1) % 2**32)
-        self.assertEqual((ack.seq, ack.ack), ((syn.seq + 1) % 2**32, (synack.seq + 1) % 2**32))
-        next_seq = {syn.dport: ack.ack, syn.sport: ack.seq}     # keyed by sending port
-        for pkt in tcp_pkts[3:]:
-            peer = pkt.dport
+        next_seq = {syn.sport: (syn.seq + 1) % 2**32, syn.dport: (synack.seq + 1) % 2**32}
+        for pkt in tcp_pkts[2:]:
+            flags = str(pkt.flags)
             self.assertEqual(pkt.seq, next_seq[pkt.sport], "bad seq: %r" % pkt)
-            self.assertEqual(pkt.ack, next_seq[peer], "bad ack: %r" % pkt)
-            next_seq[pkt.sport] = (pkt.seq + len(pkt.payload)) % 2**32
+            if 'A' in flags:
+                self.assertEqual(pkt.ack, next_seq[pkt.dport], "bad ack: %r" % pkt)
+            # SYN and FIN each consume one sequence number
+            consumed = len(pkt.payload) + (1 if ('S' in flags or 'F' in flags) else 0)
+            next_seq[pkt.sport] = (pkt.seq + consumed) % 2**32
 
     def test_seq_ack_consistent(self):
         tcp_pkts = self.tcp_packets(self.build())
@@ -135,6 +138,55 @@ class TestTcpSequence(FlowsynthTestCase):
         # handshake, data + ACK, then the two bare ACKs with no reply
         self.assertEqual([str(p.flags) for p in tcp_pkts], ['S', 'SA', 'A', 'PA', 'A', 'A', 'A'])
         self.assertEqual([p.sport for p in tcp_pkts[-2:]], [1234, 80])
+        self.assert_seq_ack_consistent(tcp_pkts)
+
+    CLOSE_SYNTH = ('flow f tcp 10.0.0.1:1234 > 10.0.0.2:80 (tcp.initialize;);\n'
+                   'f > (content:"hello";);\n'
+                   'f < (content:"world!";);\n')
+
+    def test_close_client_first(self):
+        tcp_pkts = self.tcp_packets(self.build(self.CLOSE_SYNTH + 'f > (tcp.flags.fin;);\nf < (tcp.flags.fin;);\n'))
+        flags = [(p.sport, str(p.flags)) for p in tcp_pkts[-4:]]
+        self.assertEqual(flags, [(1234, 'FA'), (80, 'A'), (80, 'FA'), (1234, 'A')])
+        fin, fin_ack, peer_fin, last_ack = tcp_pkts[-4:]
+        self.assertEqual(fin_ack.ack, fin.seq + 1)
+        self.assertEqual(peer_fin.ack, fin.seq + 1)
+        self.assertEqual((last_ack.seq, last_ack.ack), (fin.seq + 1, peer_fin.seq + 1))
+        self.assert_seq_ack_consistent(tcp_pkts)
+
+    def test_close_server_first(self):
+        tcp_pkts = self.tcp_packets(self.build(self.CLOSE_SYNTH + 'f < (tcp.flags.fin;);\nf > (tcp.flags.fin;);\n'))
+        flags = [(p.sport, str(p.flags)) for p in tcp_pkts[-4:]]
+        self.assertEqual(flags, [(80, 'FA'), (1234, 'A'), (1234, 'FA'), (80, 'A')])
+        fin, fin_ack, peer_fin, last_ack = tcp_pkts[-4:]
+        self.assertEqual(fin_ack.ack, fin.seq + 1)
+        self.assertEqual(peer_fin.ack, fin.seq + 1)
+        self.assertEqual((last_ack.seq, last_ack.ack), (fin.seq + 1, peer_fin.seq + 1))
+        self.assert_seq_ack_consistent(tcp_pkts)
+
+    def test_close_combined_fin_ack(self):
+        # tcp.noack on the first FIN lets the peer's FIN carry the ACK
+        tcp_pkts = self.tcp_packets(self.build(self.CLOSE_SYNTH +
+                                               'f > (tcp.flags.fin; tcp.noack;);\nf < (tcp.flags.fin;);\n'))
+        self.assertEqual([(p.sport, str(p.flags)) for p in tcp_pkts[-3:]],
+                         [(1234, 'FA'), (80, 'FA'), (1234, 'A')])
+        self.assert_seq_ack_consistent(tcp_pkts)
+
+    def test_fin_with_payload(self):
+        tcp_pkts = self.tcp_packets(self.build(self.CLOSE_SYNTH + 'f < (content:"bye"; tcp.flags.fin;);\n'))
+        fin, fin_ack = tcp_pkts[-2:]
+        self.assertEqual((str(fin.flags), bytes(fin.payload)), ('FPA', b'bye'))
+        self.assertEqual(fin_ack.ack, fin.seq + 3 + 1)
+        self.assert_seq_ack_consistent(tcp_pkts)
+
+    def test_manual_handshake(self):
+        synth = ('flow f tcp 10.0.0.1:1234 > 10.0.0.2:80;\n'
+                 'f > (tcp.flags.syn;);\n'
+                 'f < (tcp.flags.synack;);\n'
+                 'f > (tcp.flags.ack;);\n'
+                 'f > (content:"x";);\n')
+        tcp_pkts = self.tcp_packets(self.build(synth))
+        self.assertEqual([str(p.flags) for p in tcp_pkts], ['S', 'SA', 'A', 'PA', 'A'])
         self.assert_seq_ack_consistent(tcp_pkts)
 
     def test_seq_wraps_at_32_bits(self):

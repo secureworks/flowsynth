@@ -421,8 +421,6 @@ class Flow:
     #tcp specific values
     to_server_seq = 0
     to_client_seq = 0
-    to_server_ack = 0
-    to_client_ack = 0
     tcp_mss = 1460
 
     #has test case
@@ -471,8 +469,6 @@ class Flow:
         #initial sequence numbers; tcp.initialize uses these as the ISNs
         self.to_server_seq = RNG.getrandbits(32)
         self.to_client_seq = RNG.getrandbits(32)
-        self.to_server_ack = 0
-        self.to_client_ack = 0
         self.tcp_server_bytes = 0
         self.tcp_client_bytes = 0
 
@@ -688,6 +684,14 @@ class Flow:
                 #check for tcp flags
                 if 'tcp.flags.syn' in event['attributes']:
                     flags = "S"
+                elif 'tcp.flags.fin' in event['attributes']:
+                    #FIN with ACK; with a payload, FIN goes on the last segment only
+                    if len(total_payload) > 0:
+                        flags = 'PA'
+                    elif len(payload) > 0:
+                        flags = 'FPA'
+                    else:
+                        flags = 'FA'
                 elif 'tcp.flags.ack' in event['attributes']:
                     flags = 'A'
                 elif 'tcp.flags.synack' in event['attributes']:
@@ -717,34 +721,22 @@ class Flow:
 
                 logging.debug("Moving to ACKnowledgement stage")
 
-                #send an ACK
+                #advance the sender's next sequence number; SYN and FIN each count as one
+                seq_len = payload_size
+                if 'S' in flags or 'F' in flags:
+                    seq_len = seq_len + 1
+
+                #the peer's ACK: its own next seq, acknowledging everything sent so far
+                tcp_seq = tcp_ack
                 if (event['flow'] == Flow.FLOW_TO_CLIENT):
-                    logging.debug('SERVER requires ACK: Flow is TO_CLIENT')
-                    #flow is SERVER -> CLIENT. Use SERVERs TCP SEQ #s
-                    logging.debug("self.to_client_seq %s" % self.to_client_seq)
-                    logging.debug("self.to_client_ack %s" % self.to_client_ack)
-                    logging.debug("len payload %s" % len(payload))
-
-                    tcp_seq = tcp_ack
-                    tcp_ack = seq_add(self.to_client_seq, len(payload))
-
-                    self.to_client_ack = seq_add(self.to_client_seq, len(payload))
-                    self.to_client_seq = self.to_client_ack
-
+                    self.to_client_seq = seq_add(self.to_client_seq, seq_len)
+                    tcp_ack = self.to_client_seq
                 else:
-                    logging.debug('CLIENT requires ACK: Flow is TO_SERVER')
+                    self.to_server_seq = seq_add(self.to_server_seq, seq_len)
+                    tcp_ack = self.to_server_seq
 
-                    tmp_ack = self.to_server_seq
-
-                    tcp_seq = tcp_ack
-                    tcp_ack = seq_add(tmp_ack, payload_size)
-
-
-                    self.to_server_ack = seq_add(self.to_server_seq, payload_size)
-                    self.to_server_seq = self.to_server_ack
-
-                #a real stack doesn't acknowledge a segment that carries no data
-                if 'tcp.noack' not in event['attributes'] and payload_size > 0:
+                #a real stack doesn't acknowledge a segment that carries no data (or FIN)
+                if 'tcp.noack' not in event['attributes'] and (payload_size > 0 or 'F' in flags):
                     logging.debug('INFERRED ACK: S:%s A:%s', tcp_seq, tcp_ack)
                     lyr_eth = Ether(src = dst_mac, dst=src_mac)
                     if self.l3_proto == Flow.PROTO_IPV4:
@@ -759,8 +751,8 @@ class Flow:
         logging.debug("*** End Render Flow")
 
         logging.debug("**Flow State Table **")
-        logging.debug("to_server S: %s A: %s", self.to_server_seq, self.to_server_ack)
-        logging.debug("to_client S: %s A: %s", self.to_client_seq, self.to_client_ack)
+        logging.debug("to_server S: %s", self.to_server_seq)
+        logging.debug("to_client S: %s", self.to_client_seq)
         logging.debug("*********************\n\n")
 
         return pkts
@@ -1008,56 +1000,18 @@ def process_instructions(instr):
 
 def autogen_handshake(flowdecl):
     """generate render events for the tcp three-way handshake"""
-    global COMPILER_TIMELINE
-    global COMPILER_FLOWS
 
-    parent_flow = COMPILER_FLOWS[flowdecl['name']]
-
-    #the flow's initial sequence numbers (random 32-bit values) are the ISNs
-    client_isn = parent_flow.to_server_seq
-    server_isn = parent_flow.to_client_seq
-
-    #send syn
-    eventdecl = {}
-    eventdecl['name'] = flowdecl['name']
-    eventdecl['type'] = 'event'
-    eventdecl['flow'] = Flow.FLOW_TO_SERVER
-    eventdecl['attributes'] = {}
-    eventdecl['attributes']['tcp.flags.syn'] = True
-    eventdecl['attributes']['tcp.noack'] = True
-    eventdecl['attributes']['tcp.seq'] = client_isn
-    eventdecl['attributes']['tcp.ack'] = None
-    add_event(flowdecl['name'], eventdecl)
-
-    #send synack
-    eventdecl = {}
-    eventdecl['name'] = flowdecl['name']
-    eventdecl['type'] = 'event'
-    eventdecl['flow'] = Flow.FLOW_TO_CLIENT
-    eventdecl['attributes'] = {}
-    eventdecl['attributes']['tcp.flags.synack'] = True
-    eventdecl['attributes']['tcp.noack'] = True
-    eventdecl['attributes']['tcp.seq'] = server_isn
-    eventdecl['attributes']['tcp.ack'] = seq_add(client_isn, 1)
-    add_event(flowdecl['name'], eventdecl)
-
-    #send ack
-    eventdecl = {}
-    eventdecl['name'] = flowdecl['name']
-    eventdecl['type'] = 'event'
-    eventdecl['flow'] = Flow.FLOW_TO_SERVER
-    eventdecl['attributes'] = {}
-    eventdecl['attributes']['tcp.flags.ack'] = True
-    eventdecl['attributes']['tcp.noack'] = True
-    eventdecl['attributes']['tcp.ack'] = seq_add(server_isn, 1)
-    eventdecl['attributes']['tcp.seq'] = seq_add(client_isn, 1)
-    add_event(flowdecl['name'], eventdecl)
-
-    #dont set the parent flows SEQ/ACK until the end of this process
-    parent_flow.to_server_seq = seq_add(client_isn, 1)
-    parent_flow.to_client_seq = seq_add(server_isn, 1)
-    parent_flow.to_server_ack = client_isn
-    parent_flow.to_client_ack = seq_add(server_isn, 1)
+    #the flow's initial sequence numbers (random 32-bit values) are the ISNs; the
+    #SYN and SYN/ACK each consume one, as rendered
+    for flow, flag in ((Flow.FLOW_TO_SERVER, 'tcp.flags.syn'),
+                       (Flow.FLOW_TO_CLIENT, 'tcp.flags.synack'),
+                       (Flow.FLOW_TO_SERVER, 'tcp.flags.ack')):
+        eventdecl = {}
+        eventdecl['name'] = flowdecl['name']
+        eventdecl['type'] = 'event'
+        eventdecl['flow'] = flow
+        eventdecl['attributes'] = {flag: True, 'tcp.noack': True}
+        add_event(flowdecl['name'], eventdecl)
 
 
 #has test case

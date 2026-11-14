@@ -191,6 +191,7 @@ The following event attributes are currently supported:
 +   tcp.noack
 +   tcp.flags.syn
 +   tcp.flags.ack
++   tcp.flags.fin
 +   tcp.flags.rst
 
 ##### Content Attribute #####
@@ -223,6 +224,19 @@ The *tcp.flags.syn* attribute tells Flowsynth to force the packet to be a SYN pa
 
 ##### tcp.flags.ack Attribute #####
 The *tcp.flags.ack* attribute tells Flowsynth to force the packet to be an ACK packet.
+
+##### tcp.flags.fin Attribute #####
+The *tcp.flags.fin* attribute tells Flowsynth to send a FIN (with ACK) to close that side of the connection. If the event also has content, the FIN is set on the last data segment. Like a SYN, a FIN consumes one sequence number: the other side's ACK acknowledges it, and any later packets from the closing side continue after it.
+
+A four-way close, with the client closing first:
+
+    default > (tcp.flags.fin;);
+    default < (tcp.flags.fin;);
+
+This produces FIN/ACK, ACK, FIN/ACK, ACK. To have the server's FIN carry the ACK of the client's FIN (a three-packet close), add *tcp.noack* to the first FIN:
+
+    default > (tcp.flags.fin; tcp.noack;);
+    default < (tcp.flags.fin;);
 
 ##### tcp.flags.rst Attribute #####
 The *tcp.flags.rst* attribute tells Flowsynth to force the packet to be a RST packet.
